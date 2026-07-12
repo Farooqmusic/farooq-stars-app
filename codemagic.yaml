@@ -1,0 +1,81 @@
+# Codemagic build configuration — Farooq Stars
+# iOS workflow: signed App Store .ipa -> TestFlight
+# Android workflow: signed .aab (app bundle) for Google Play
+workflows:
+  ios-farooq-stars:
+    name: Farooq Stars iOS
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      # Same account-level App Store Connect API key used for Farooq Music
+      app_store_connect: Farooq Music
+    environment:
+      groups:
+        - farooq_signing          # contains CERTIFICATE_PRIVATE_KEY (secret, base64)
+      vars:
+        BUNDLE_ID: "com.farooqstars.app"
+        # TODO: after creating the app in App Store Connect (My Apps -> + ->
+        # New App -> bundle com.farooqstars.app), open the app page and copy
+        # its numeric "Apple ID" here. Until then the iOS workflow can't
+        # upload to TestFlight.
+        APP_STORE_APPLE_ID: 0000000000
+      flutter: stable
+      xcode: latest
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Initialize keychain
+        script: |
+          keychain initialize
+      - name: Create / fetch signing files
+        script: |
+          printf '%s' "$CERTIFICATE_PRIVATE_KEY" | openssl base64 -A -d > /tmp/cert_key.pem
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --certificate-key @file:/tmp/cert_key.pem \
+            --create
+      - name: Add certificate to keychain
+        script: |
+          keychain add-certificates
+      - name: Apply signing to Xcode project
+        script: |
+          xcode-project use-profiles
+      - name: Set build number (one higher than latest on TestFlight)
+        script: |
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" 2>/dev/null || echo 0)
+          NEXT=$(( ${LATEST:-0} + 1 ))
+          echo "Using build number: $NEXT"
+          cd ios && agvtool new-version -all "$NEXT" && cd ..
+      - name: Build signed IPA
+        script: |
+          flutter build ipa --release \
+            --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+  android-farooq-stars:
+    name: Farooq Stars Android
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      android_signing:
+        # Reuses the existing upload key; a dedicated farooq_stars keystore
+        # can be created in the Codemagic UI later if preferred.
+        - farooq_music_keystore
+      flutter: stable
+      java: 17
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Build signed Android App Bundle
+        script: |
+          flutter build appbundle --release \
+            --build-number=$PROJECT_BUILD_NUMBER
+    artifacts:
+      - build/app/outputs/bundle/release/*.aab
+      - build/app/outputs/mapping/release/mapping.txt

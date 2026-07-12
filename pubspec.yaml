@@ -1,0 +1,31 @@
+name: farooq_stars
+description: "Farooq Stars — Western & Vedic astrology, zodiac signs and compatibility, for curiosity and fun."
+publish_to: 'none'
+
+# App version: change the line below on each release (build number is set by
+# Codemagic automatically for iOS; Android uses $PROJECT_BUILD_NUMBER).
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  http: ^1.6.0
+  # ---- Backend (same Supabase project as farooqstars.com) ----
+  supabase_flutter: ^2.12.4
+  # ---- Small utilities ----
+  url_launcher: ^6.3.1
+  shared_preferences: ^2.3.2
+  share_plus: ^13.1.0
+  package_info_plus: ^10.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
