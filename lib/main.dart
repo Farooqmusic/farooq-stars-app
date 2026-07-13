@@ -9,8 +9,11 @@
 // (phones portrait+landscape, tablets). Live daily readings from Supabase
 // switch on in Phase 2 once the anon key + table names are wired in.
 // ===========================================================================
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +38,8 @@ const kSupabaseAnonKey = '';
 bool get supabaseReady => kSupabaseAnonKey.isNotEmpty;
 
 const kWebsite = 'https://www.farooqstars.com';
+// Cloudflare Worker — live daily readings (same cache the website uses)
+const kWorker = 'https://farooq-stars-ai.babaqatar.workers.dev';
 
 late SharedPreferences prefs;
 
@@ -99,6 +104,7 @@ const Map<String, Map<AppLang, String>> _tr = {
     AppLang.hi: 'रोज़ाना की live readings अगले update में आ रही हैं — तब तक आज की post website पर पढ़ें।',
     AppLang.ar: 'القراءات اليومية المباشرة قادمة في التحديث القادم — حتى ذلك الحين اقرأ منشور اليوم على الموقع.',
   },
+  'readingError': {AppLang.en: "Couldn't load today's reading — check your connection and tap ↻.", AppLang.ur: 'آج کی reading load نہیں ہو سکی — internet دیکھ کر ↻ دبائیں۔', AppLang.hi: 'आज का फल load नहीं हो सका — internet देखकर ↻ दबाएँ।', AppLang.ar: 'تعذّر تحميل قراءة اليوم — تحقق من الاتصال واضغط ↻.'},
   'readOnWebsite': {AppLang.en: 'Read on website', AppLang.ur: 'Website پر پڑھیں', AppLang.hi: 'Website पर पढ़ें', AppLang.ar: 'اقرأ على الموقع'},
   'fullProfile': {AppLang.en: 'Full profile on website', AppLang.ur: 'مکمل profile website پر', AppLang.hi: 'पूरी profile website पर', AppLang.ar: 'الملف الكامل على الموقع'},
   'pickTwo':    {AppLang.en: 'Pick two signs and see how they get along', AppLang.ur: 'دو برج چنیں اور دیکھیں ان کی کیسی بنتی ہے', AppLang.hi: 'दो राशियाँ चुनें और देखें उनकी कैसी बनती है', AppLang.ar: 'اختر برجين وشاهد مدى انسجامهما'},
@@ -295,6 +301,11 @@ String signSymbolUrl(int i, {required bool vedic}) =>
 String signArtUrl(int i, {required bool vedic}) =>
   '$kWebsite/signs/${vedic ? 'V' : 'Z'}${(i + 1).toString().padLeft(2, '0')}.png';
 
+/// The ORIGINAL large artwork in public_html root (Aries.png … 2–8 MB).
+/// Used as the Today-card hero; the smaller card art shows instantly as a
+/// placeholder while this downloads, then it stays cached on-device.
+String signBigArtUrl(int i) => '$kWebsite/${signs[i].name[AppLang.en]!}.png';
+
 String? planetIconUrl(ZSign s) {
   final p = (s.planet[AppLang.en] ?? '').toLowerCase();
   const known = {'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter',
@@ -316,22 +327,33 @@ class SignIcon extends StatelessWidget {
       style: TextStyle(fontSize: size * 0.8, color: kGold)));
 }
 
-/// Big artistic sign banner (Z/V artwork from /signs/).
+/// Big artistic sign banner. Square frame + BoxFit.contain = the WHOLE
+/// image is always visible, nothing cut top/bottom (Build 3 fix).
+/// hero:true (Today card) shows the ORIGINAL large root artwork, with the
+/// smaller /signs/ card art appearing instantly while it downloads.
 class SignArt extends StatelessWidget {
   final ZSign sign;
-  final double height;
-  const SignArt(this.sign, {super.key, this.height = 170});
+  final bool hero;
+  const SignArt(this.sign, {super.key, this.hero = false});
   @override
   Widget build(BuildContext context) {
     final i = signs.indexOf(sign);
+    final fallback = Center(child: Text(sign.symbol,
+      style: const TextStyle(fontSize: 64, color: kGold)));
+    final cardArt = CachedNetworkImage(
+      imageUrl: signArtUrl(i, vedic: useVedic.value),
+      fit: BoxFit.contain,
+      placeholder: (_, __) => Container(color: kBg),
+      errorWidget: (_, __, ___) => fallback);
+    final img = hero
+      ? CachedNetworkImage(
+          imageUrl: signBigArtUrl(i),
+          fit: BoxFit.contain,
+          placeholder: (_, __) => cardArt,
+          errorWidget: (_, __, ___) => cardArt)
+      : cardArt;
     return ClipRRect(borderRadius: BorderRadius.circular(18),
-      child: CachedNetworkImage(
-        imageUrl: signArtUrl(i, vedic: useVedic.value),
-        height: height, width: double.infinity, fit: BoxFit.cover,
-        placeholder: (_, __) => Container(height: height, color: kBg),
-        errorWidget: (_, __, ___) => SizedBox(height: height,
-          child: Center(child: Text(sign.symbol,
-            style: TextStyle(fontSize: height * 0.35, color: kGold))))));
+      child: AspectRatio(aspectRatio: 1, child: img));
   }
 }
 
@@ -553,7 +575,9 @@ class TodayTab extends StatelessWidget {
           const SizedBox(height: 18),
           if (sign != null) ...[
             SignCard(sign: sign),
-            DailyReadingCard(sign: sign),
+            DailyReadingCard(
+              key: ValueKey('read-${sign.key}-${currentLang.value.name}'),
+              sign: sign),
           ] else
             card(child: Column(children: [
               const Text('✨', style: TextStyle(fontSize: 40)),
@@ -590,7 +614,7 @@ class SignCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final lang = currentLang.value;
     return card(child: Column(children: [
-      SignArt(sign),
+      SignArt(sign, hero: true),
       const SizedBox(height: 12),
       Text(signName(sign),
         style: TextStyle(color: kOn, fontSize: 24,
@@ -614,9 +638,50 @@ class SignCard extends StatelessWidget {
   }
 }
 
-class DailyReadingCard extends StatelessWidget {
+class DailyReadingCard extends StatefulWidget {
   final ZSign sign;
   const DailyReadingCard({super.key, required this.sign});
+  @override
+  State<DailyReadingCard> createState() => _DailyReadingCardState();
+}
+
+class _DailyReadingCardState extends State<DailyReadingCard> {
+  // One fetch per sign+language per session — after that it's instant.
+  static final Map<String, String> _memCache = {};
+  String? _text;
+  bool _loading = true, _error = false;
+
+  String get _cacheKey => '${widget.sign.key}:${currentLang.value.name}:today';
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final k = _cacheKey;
+    if (_memCache.containsKey(k)) {
+      setState(() { _text = _memCache[k]; _loading = false; _error = false; });
+      return;
+    }
+    setState(() { _loading = true; _error = false; });
+    try {
+      // The SAME real AstrologyAPI reading the website shows — served from
+      // the worker's morning cache, no new API cost. First hi/ar request of
+      // the day translates once server-side, then that is cached too.
+      final uri = Uri.parse('$kWorker/app/reading'
+        '?s=${widget.sign.key}&period=today&lang=${currentLang.value.name}');
+      final r = await http.get(uri).timeout(const Duration(seconds: 30));
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final t = d['ok'] == true ? (d['text'] ?? '').toString().trim() : '';
+      if (t.isEmpty) throw Exception('empty');
+      _memCache[k] = t;
+      if (mounted) setState(() { _text = t; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; _error = true; });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -632,11 +697,28 @@ class DailyReadingCard extends StatelessWidget {
           Text(tr('dailyReading'),
             style: TextStyle(color: kOn, fontSize: 16,
               fontWeight: FontWeight.w800, fontFamily: urduFont)),
+          const Spacer(),
+          if (!_loading) IconButton(
+            icon: const Icon(Icons.refresh, color: kMuted, size: 19),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: 'Refresh',
+            onPressed: () { _memCache.remove(_cacheKey); _load(); }),
         ]),
         const SizedBox(height: 10),
-        Text(tr('comingLive'),
-          style: TextStyle(color: kMuted, fontSize: 13.5, height: 1.8,
-            fontFamily: urduFont)),
+        if (_loading)
+          const Padding(padding: EdgeInsets.symmetric(vertical: 20),
+            child: Center(child: SizedBox(width: 26, height: 26,
+              child: CircularProgressIndicator(
+                strokeWidth: 3, color: kPrimary))))
+        else if (_error)
+          Text(tr('readingError'),
+            style: TextStyle(color: kMuted, fontSize: 13.5, height: 1.8,
+              fontFamily: urduFont))
+        else
+          Text(_text!,
+            style: TextStyle(color: kLight, fontSize: 15, height: 1.95,
+              fontWeight: FontWeight.w500, fontFamily: urduFont)),
         const SizedBox(height: 12),
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: kPrimary,
@@ -717,7 +799,7 @@ void showSignSheet(BuildContext context, ZSign sign) {
                 decoration: BoxDecoration(color: kBorder,
                   borderRadius: BorderRadius.circular(99)))),
               const SizedBox(height: 16),
-              SignArt(sign, height: 190),
+              SignArt(sign),
               const SizedBox(height: 10),
               Center(child: Text(
                 '${sign.name[lang] ?? sign.name[AppLang.en]!}  ·  ${sign.vname[lang] ?? sign.vname[AppLang.en]!}',
