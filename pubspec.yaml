@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # App version: change the line below on each release (build number is set by
 # Codemagic automatically for iOS; Android uses $PROJECT_BUILD_NUMBER).
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.12.2
@@ -14,6 +14,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   http: ^1.6.0
+  # ---- Site image icons (Build 2): same PNGs as farooqstars.com, cached on-device ----
+  cached_network_image: ^3.4.1
   # ---- Backend (same Supabase project as farooqstars.com) ----
   supabase_flutter: ^2.12.4
   # ---- Small utilities ----
