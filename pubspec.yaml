@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # App version: change the line below on each release (build number is set by
 # Codemagic automatically for iOS; Android uses $PROJECT_BUILD_NUMBER).
-version: 0.3.2+5
+version: 0.4.0+6
 
 environment:
   sdk: ^3.12.2
