@@ -632,7 +632,7 @@ class SignCard extends StatelessWidget {
       const SizedBox(height: 14),
       Text(sign.trait[lang] ?? sign.trait[AppLang.en]!,
         textAlign: TextAlign.center,
-        style: TextStyle(color: kLight, fontSize: 15, height: 1.9,
+        style: TextStyle(color: Colors.white, fontSize: 15, height: 1.9,
           fontWeight: FontWeight.w500, fontFamily: urduFont)),
     ]));
   }
@@ -720,8 +720,10 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
             style: TextStyle(color: kMuted, fontSize: 13.5, height: 1.8,
               fontFamily: urduFont))
         else
+          // Standing rule: reading text is WHITE in every language — the
+          // background is purple, purple-on-purple is hard to read.
           Text(_text!,
-            style: TextStyle(color: kLight, fontSize: 15, height: 1.95,
+            style: TextStyle(color: Colors.white, fontSize: 15, height: 1.95,
               fontWeight: FontWeight.w500, fontFamily: urduFont)),
         const SizedBox(height: 12),
         FilledButton.icon(
@@ -818,7 +820,7 @@ void showSignSheet(BuildContext context, ZSign sign) {
               const SizedBox(height: 14),
               Text(sign.trait[lang] ?? sign.trait[AppLang.en]!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: kLight, fontSize: 15.5, height: 1.9,
+                style: TextStyle(color: Colors.white, fontSize: 15.5, height: 1.9,
                   fontFamily: urduFont)),
               const SizedBox(height: 18),
               FilledButton.icon(
