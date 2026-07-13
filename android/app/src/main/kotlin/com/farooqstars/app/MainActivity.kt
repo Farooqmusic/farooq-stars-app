@@ -1,10 +1,8 @@
 package com.farooqstars.app
 
-// just_audio_background requires the main activity to be AudioServiceActivity
-// (it extends FlutterActivity internally, but also connects the background
-// audio service to the same Flutter engine). With a plain FlutterActivity,
-// play/pause commands never reach the audio engine on Android, so no song
-// plays — neither streaming nor offline. iOS is unaffected by this class.
-import com.ryanheise.audioservice.AudioServiceActivity
+// Farooq Stars has no background-audio packages (no audio_service /
+// just_audio_background in pubspec.yaml), so the plain FlutterActivity
+// is the correct main activity for this app.
+import io.flutter.embedding.android.FlutterActivity
 
-class MainActivity : AudioServiceActivity()
+class MainActivity : FlutterActivity()
