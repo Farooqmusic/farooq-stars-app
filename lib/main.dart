@@ -317,22 +317,24 @@ const List<ZSign> signs = [
 //   • planets       →  /planet-icons-v2/<planet>.png
 //   • big artwork   →  /signs/Z01..Z12.png (Western) · V01..V12.png (Vedic)
 // ===========================================================================
+// STANDING RULE: the app reads ONLY from the site's /app/ folder —
+// farooq-app-sync.php keeps those copies fresh from the site originals.
 String signSymbolUrl(int i, {required bool vedic}) =>
-  '$kWebsite/icons/${vedic ? 'hz' : 'z'}symbol${i + 1}.png';
+  '$kWebsite/app/icons/${vedic ? 'hz' : 'z'}symbol${i + 1}.png';
 
 String signArtUrl(int i, {required bool vedic}) =>
-  '$kWebsite/signs/${vedic ? 'V' : 'Z'}${(i + 1).toString().padLeft(2, '0')}.png';
+  '$kWebsite/app/signs/${vedic ? 'V' : 'Z'}${(i + 1).toString().padLeft(2, '0')}.png';
 
 /// The ORIGINAL large artwork in public_html root (Aries.png … 2–8 MB).
 /// Used as the Today-card hero; the smaller card art shows instantly as a
 /// placeholder while this downloads, then it stays cached on-device.
-String signBigArtUrl(int i) => '$kWebsite/${signs[i].name[AppLang.en]!}.png';
+String signBigArtUrl(int i) => '$kWebsite/app/art/${signs[i].name[AppLang.en]!}.png';
 
 String? planetIconUrl(ZSign s) {
   final p = (s.planet[AppLang.en] ?? '').toLowerCase();
   const known = {'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter',
     'saturn', 'uranus', 'neptune', 'pluto', 'rahu', 'ketu'};
-  return known.contains(p) ? '$kWebsite/planet-icons-v2/$p.png' : null;
+  return known.contains(p) ? '$kWebsite/app/planet-icons-v2/$p.png' : null;
 }
 
 /// Small sign symbol — vedic-aware (hzsymbol vs zsymbol).
