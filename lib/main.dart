@@ -43,7 +43,9 @@ const kWorker = 'https://farooq-stars-ai.babaqatar.workers.dev';
 // Build 5: full sign profiles — extracted from farooq-zodiac.html +
 // farooq-rashis.html into ONE json on the site. Site stays the source of
 // truth: update the json and every installed app shows the new text.
-const kProfilesUrl = '$kWebsite/farooq-profiles.json';
+// STANDING RULE: app-only files live in the site's /app/ folder — never
+// mixed with website files.
+const kProfilesUrl = '$kWebsite/app/farooq-profiles.json';
 
 Map<String, dynamic>? _profilesData;
 Future<Map<String, dynamic>?> loadProfiles() async {
