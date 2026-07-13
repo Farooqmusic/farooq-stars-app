@@ -104,6 +104,10 @@ const Map<String, Map<AppLang, String>> _tr = {
     AppLang.hi: 'रोज़ाना की live readings अगले update में आ रही हैं — तब तक आज की post website पर पढ़ें।',
     AppLang.ar: 'القراءات اليومية المباشرة قادمة في التحديث القادم — حتى ذلك الحين اقرأ منشور اليوم على الموقع.',
   },
+  'p_today': {AppLang.en: 'Today', AppLang.ur: 'آج', AppLang.hi: 'आज', AppLang.ar: 'اليوم'},
+  'p_week': {AppLang.en: 'This week', AppLang.ur: 'یہ ہفتہ', AppLang.hi: 'यह सप्ताह', AppLang.ar: 'هذا الأسبوع'},
+  'p_month': {AppLang.en: 'This month', AppLang.ur: 'یہ مہینہ', AppLang.hi: 'यह महीना', AppLang.ar: 'هذا الشهر'},
+  'p_year': {AppLang.en: 'This year', AppLang.ur: 'یہ سال', AppLang.hi: 'यह वर्ष', AppLang.ar: 'هذه السنة'},
   'readingError': {AppLang.en: "Couldn't load today's reading — check your connection and tap ↻.", AppLang.ur: 'آج کی reading load نہیں ہو سکی — internet دیکھ کر ↻ دبائیں۔', AppLang.hi: 'आज का फल load नहीं हो सका — internet देखकर ↻ दबाएँ।', AppLang.ar: 'تعذّر تحميل قراءة اليوم — تحقق من الاتصال واضغط ↻.'},
   'readOnWebsite': {AppLang.en: 'Read on website', AppLang.ur: 'Website پر پڑھیں', AppLang.hi: 'Website पर पढ़ें', AppLang.ar: 'اقرأ على الموقع'},
   'fullProfile': {AppLang.en: 'Full profile on website', AppLang.ur: 'مکمل profile website پر', AppLang.hi: 'पूरी profile website पर', AppLang.ar: 'الملف الكامل على الموقع'},
@@ -646,12 +650,15 @@ class DailyReadingCard extends StatefulWidget {
 }
 
 class _DailyReadingCardState extends State<DailyReadingCard> {
-  // One fetch per sign+language per session — after that it's instant.
+  // One fetch per sign+language+period per session — after that it's instant.
   static final Map<String, String> _memCache = {};
   String? _text;
   bool _loading = true, _error = false;
+  // Build 4: today | week | month | year — same worker cache the site uses.
+  String _period = 'today';
 
-  String get _cacheKey => '${widget.sign.key}:${currentLang.value.name}:today';
+  String get _cacheKey =>
+    '${widget.sign.key}:${currentLang.value.name}:$_period';
 
   @override
   void initState() {
@@ -671,7 +678,7 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
       // the worker's morning cache, no new API cost. First hi/ar request of
       // the day translates once server-side, then that is cached too.
       final uri = Uri.parse('$kWorker/app/reading'
-        '?s=${widget.sign.key}&period=today&lang=${currentLang.value.name}');
+        '?s=${widget.sign.key}&period=$_period&lang=${currentLang.value.name}');
       final r = await http.get(uri).timeout(const Duration(seconds: 30));
       final d = jsonDecode(r.body) as Map<String, dynamic>;
       // AstrologyAPI/translation text mein kabhi kabhi **markdown** ke
@@ -709,6 +716,29 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
             tooltip: 'Refresh',
             onPressed: () { _memCache.remove(_cacheKey); _load(); }),
         ]),
+        const SizedBox(height: 8),
+        // Period selector — Today / Week / Month / Year
+        Wrap(spacing: 6, runSpacing: 6, children:
+          ['today', 'week', 'month', 'year'].map((p) {
+            final sel = p == _period;
+            return GestureDetector(
+              onTap: () {
+                if (_period == p) return;
+                setState(() => _period = p);
+                _load();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: sel ? kPrimary : kBg,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: sel ? kPrimary : kBorder)),
+                child: Text(tr('p_$p'),
+                  style: TextStyle(
+                    color: sel ? Colors.white : kMuted, fontSize: 12.5,
+                    fontWeight: FontWeight.w700, fontFamily: urduFont))));
+          }).toList()),
         const SizedBox(height: 10),
         if (_loading)
           const Padding(padding: EdgeInsets.symmetric(vertical: 20),
@@ -822,7 +852,12 @@ void showSignSheet(BuildContext context, ZSign sign) {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.white, fontSize: 15.5, height: 1.9,
                   fontFamily: urduFont)),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
+              // Build 4: poori LIVE reading yahin sheet ke andar
+              DailyReadingCard(
+                key: ValueKey('sheet-${sign.key}-${currentLang.value.name}'),
+                sign: sign),
+              const SizedBox(height: 4),
               FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: kPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12)),
