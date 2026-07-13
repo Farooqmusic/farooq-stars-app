@@ -40,6 +40,22 @@ bool get supabaseReady => kSupabaseAnonKey.isNotEmpty;
 const kWebsite = 'https://www.farooqstars.com';
 // Cloudflare Worker — live daily readings (same cache the website uses)
 const kWorker = 'https://farooq-stars-ai.babaqatar.workers.dev';
+// Build 5: full sign profiles — extracted from farooq-zodiac.html +
+// farooq-rashis.html into ONE json on the site. Site stays the source of
+// truth: update the json and every installed app shows the new text.
+const kProfilesUrl = '$kWebsite/farooq-profiles.json';
+
+Map<String, dynamic>? _profilesData;
+Future<Map<String, dynamic>?> loadProfiles() async {
+  if (_profilesData != null) return _profilesData;
+  try {
+    final r = await http.get(Uri.parse(kProfilesUrl))
+      .timeout(const Duration(seconds: 30));
+    _profilesData = jsonDecode(r.body) as Map<String, dynamic>;
+  } catch (_) {}
+  return _profilesData;
+}
+
 
 late SharedPreferences prefs;
 
@@ -618,7 +634,10 @@ class SignCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final lang = currentLang.value;
     return card(child: Column(children: [
-      SignArt(sign, hero: true),
+      GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+          builder: (_) => ProfileScreen(sign: sign))),
+        child: SignArt(sign, hero: true)),
       const SizedBox(height: 12),
       Text(signName(sign),
         style: TextStyle(color: kOn, fontSize: 24,
@@ -769,6 +788,222 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
 }
 
 // ===========================================================================
+// Build 5: FULL SIGN PROFILE — same content as the site's zodiac/rashi pages
+// (traits, details table, personality, 8 tabbed sections, 4 languages).
+// ===========================================================================
+class ProfileScreen extends StatefulWidget {
+  final ZSign sign;
+  const ProfileScreen({super.key, required this.sign});
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? _all;
+  bool _failed = false;
+  String _tab = 'general';
+
+  @override
+  void initState() {
+    super.initState();
+    loadProfiles().then((d) {
+      if (mounted) setState(() { _all = d; _failed = d == null; });
+    });
+  }
+
+  // one language value out of a {en,ur,hi,ar} map
+  String lx(dynamic m) {
+    if (m is Map) {
+      return (m[currentLang.value.name] ?? m['en'] ?? '').toString();
+    }
+    return m == null ? '' : m.toString();
+  }
+
+  Widget _row(String label, Widget value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(flex: 2, child: Text(label,
+        style: TextStyle(color: kMuted, fontSize: 13.5,
+          fontFamily: urduFont))),
+      Expanded(flex: 3, child: Align(
+        alignment: AlignmentDirectional.centerEnd, child: value)),
+    ]));
+
+  Widget _txt(String t, {Color c = kOn, double fs = 13.5,
+      FontWeight w = FontWeight.w600}) =>
+    Text(t, textAlign: TextAlign.end,
+      style: TextStyle(color: c, fontSize: fs, fontWeight: w,
+        fontFamily: urduFont));
+
+  @override
+  Widget build(BuildContext context) {
+    final vedic = useVedic.value;
+    final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
+    final sk = widget.sign.key;
+    final sg = sys?['signs']?[sk] as Map<String, dynamic>?;
+    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
+    final tabs = (sys?['tabs'] ?? {}) as Map<String, dynamic>;
+    final lang = currentLang.value;
+
+    Widget body;
+    if (_failed) {
+      body = Center(child: Padding(padding: const EdgeInsets.all(30),
+        child: Text(tr('readingError'), textAlign: TextAlign.center,
+          style: TextStyle(color: kMuted, fontSize: 14, height: 1.8,
+            fontFamily: urduFont))));
+    } else if (sg == null) {
+      body = const Center(child: SizedBox(width: 30, height: 30,
+        child: CircularProgressIndicator(strokeWidth: 3, color: kPrimary)));
+    } else {
+      final order = (sys!['order'] as List).cast<String>();
+      final traits = lx(sg['traits']).split('·')
+        .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+      final details = (sg['details'] ?? {}) as Map<String, dynamic>;
+      const tabOrder = ['general', 'career', 'love', 'health',
+        'gems', 'dark', 'family', 'karma'];
+
+      body = Center(child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: ListView(
+          padding: EdgeInsets.fromLTRB(20, 12, 20,
+            28 + MediaQuery.of(context).viewPadding.bottom),
+          children: [
+            SignArt(widget.sign, hero: true),
+            const SizedBox(height: 14),
+            Center(child: Text(signName(widget.sign),
+              style: TextStyle(color: kOn, fontSize: 26,
+                fontWeight: FontWeight.w800, fontFamily: urduFont))),
+            const SizedBox(height: 4),
+            Center(child: Text(lx(sg['dates']),
+              style: const TextStyle(color: kMuted, fontSize: 13))),
+            const SizedBox(height: 12),
+            // trait chips
+            Wrap(spacing: 8, runSpacing: 8,
+              alignment: WrapAlignment.center,
+              children: traits.map((t) => Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(color: kCard,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: kBorder)),
+                child: Text(t, style: TextStyle(color: kGold,
+                  fontSize: 12.5, fontWeight: FontWeight.w700,
+                  fontFamily: urduFont)))).toList()),
+            const SizedBox(height: 16),
+            // details table — same rows as the website
+            card(child: Column(children: [
+              _row(lx(rows['dates']), _txt(lx(sg['dates']))),
+              _row(lx(rows['element']),
+                _txt(lx(sys['el']?[sg['el']]))),
+              _row(lx(rows['quality']),
+                _txt(lx(sys['qu']?[sg['qu']]))),
+              _row(lx(rows['ruler']), _txt(((sg['ruler'] ?? []) as List)
+                .map((r) => lx(sys['pl']?[r])).join(' · '))),
+              _row(lx(rows['day']),
+                _txt(lx(sys['day']?[sg['day']]))),
+              _row(lx(rows['numbers']), Wrap(spacing: 6,
+                alignment: WrapAlignment.end,
+                children: ((sg['nums'] ?? []) as List).map((n) => Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(color: kBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: kBorder)),
+                  child: Text('$n', style: const TextStyle(color: kOn,
+                    fontSize: 13, fontWeight: FontWeight.w700)))).toList())),
+              _row(lx(rows['colors']), Wrap(spacing: 10, runSpacing: 4,
+                alignment: WrapAlignment.end,
+                children: ((sg['colors'] ?? []) as List).map((ck) {
+                  final cm = sys['col']?[ck] as Map<String, dynamic>?;
+                  final hex = (cm?['h'] ?? '#888888') as String;
+                  final col = Color(int.parse(
+                    'ff${hex.replaceFirst('#', '')}', radix: 16));
+                  return Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(width: 12, height: 12,
+                      decoration: BoxDecoration(color: col,
+                        shape: BoxShape.circle)),
+                    const SizedBox(width: 5),
+                    Text(lx(cm), style: TextStyle(color: kOn,
+                      fontSize: 13, fontWeight: FontWeight.w600,
+                      fontFamily: urduFont)),
+                  ]);
+                }).toList())),
+              _row(lx(rows['compat']), Wrap(spacing: 6, runSpacing: 6,
+                alignment: WrapAlignment.end,
+                children: ((sg['compat'] ?? []) as List).map((mk) {
+                  final mi = order.indexOf(mk as String);
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(color: kBg,
+                      borderRadius: BorderRadius.circular(99),
+                      border: Border.all(color: kBorder)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      if (mi >= 0) ...[
+                        SignIcon(mi, size: 16),
+                        const SizedBox(width: 5),
+                      ],
+                      Text(lx(sys['sname']?[mk]),
+                        style: TextStyle(color: kOn, fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: urduFont)),
+                    ]));
+                }).toList())),
+            ])),
+            const SizedBox(height: 16),
+            Text(lx(rows['personality']).toUpperCase(),
+              style: const TextStyle(color: kGold, fontSize: 13,
+                fontWeight: FontWeight.w800, letterSpacing: 1.5)),
+            const SizedBox(height: 8),
+            Text(lx(sg['pers']),
+              style: TextStyle(color: Colors.white, fontSize: 15,
+                height: 1.9, fontFamily: urduFont)),
+            const SizedBox(height: 18),
+            // section tabs — same 8 as the website
+            Wrap(spacing: 6, runSpacing: 6, children: tabOrder.map((t) {
+              final sel = t == _tab;
+              return GestureDetector(
+                onTap: () => setState(() => _tab = t),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 13, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: sel ? kPrimary : kCard,
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(
+                      color: sel ? kPrimary : kBorder)),
+                  child: Text(lx(tabs[t]),
+                    style: TextStyle(
+                      color: sel ? Colors.white : kMuted,
+                      fontSize: 12.5, fontWeight: FontWeight.w700,
+                      fontFamily: urduFont))));
+            }).toList()),
+            const SizedBox(height: 14),
+            Text(lx(details[_tab]),
+              style: TextStyle(color: Colors.white, fontSize: 15,
+                height: 1.95, fontFamily: urduFont)),
+            const SizedBox(height: 6),
+            // language switch reminder is not needed — app-wide language applies
+          ])));
+    }
+
+    return Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(signName(widget.sign),
+            style: TextStyle(color: kGold, fontSize: 18,
+              fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: ValueListenableBuilder<AppLang>(
+          valueListenable: currentLang,
+          builder: (_, __, ___) => body)));
+  }
+}
+
+// ===========================================================================
 // ZODIAC tab — all 12 signs
 // ===========================================================================
 class ZodiacTab extends StatelessWidget {
@@ -861,10 +1096,12 @@ void showSignSheet(BuildContext context, ZSign sign) {
               FilledButton.icon(
                 style: FilledButton.styleFrom(backgroundColor: kPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12)),
-                onPressed: () => openUrl(useVedic.value
-                  ? '$kWebsite/farooq-rashis.html'
-                  : '$kWebsite/farooq-zodiac.html'),
-                icon: const Icon(Icons.open_in_new, size: 18),
+                onPressed: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => ProfileScreen(sign: sign)));
+                },
+                icon: const Icon(Icons.auto_stories, size: 18),
                 label: Text(tr('fullProfile'),
                   style: TextStyle(fontWeight: FontWeight.w700,
                     fontFamily: urduFont))),
