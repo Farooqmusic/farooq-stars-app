@@ -10,6 +10,7 @@
 // switch on in Phase 2 once the anon key + table names are wired in.
 // ===========================================================================
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -277,12 +278,60 @@ const List<ZSign> signs = [
      AppLang.ar: 'تعاطف عميق كالحلم يسبح بين العوالم.'}),
 ];
 
-String elementEmoji(String e) {
-  switch (e) {
-    case 'fire': return '🔥';
-    case 'earth': return '🌱';
-    case 'air': return '🌬️';
-    default: return '💧';
+// ===========================================================================
+// v0.2 (Build 2): SITE IMAGE ICONS — the SAME PNGs farooqstars.com uses, so
+// the look is identical on Android, iOS and web. Standing rule: NEVER
+// text/emoji symbols (every platform draws those differently). Images are
+// loaded from the site and cached on-device (cached_network_image); if the
+// phone is offline before the first cache, the old text symbol appears as a
+// quiet fallback so nothing ever looks broken.
+//   • sign symbols  →  /icons/zsymbol1..12.png (Western) · hzsymbol1..12.png (Vedic)
+//   • planets       →  /planet-icons-v2/<planet>.png
+//   • big artwork   →  /signs/Z01..Z12.png (Western) · V01..V12.png (Vedic)
+// ===========================================================================
+String signSymbolUrl(int i, {required bool vedic}) =>
+  '$kWebsite/icons/${vedic ? 'hz' : 'z'}symbol${i + 1}.png';
+
+String signArtUrl(int i, {required bool vedic}) =>
+  '$kWebsite/signs/${vedic ? 'V' : 'Z'}${(i + 1).toString().padLeft(2, '0')}.png';
+
+String? planetIconUrl(ZSign s) {
+  final p = (s.planet[AppLang.en] ?? '').toLowerCase();
+  const known = {'sun', 'moon', 'mercury', 'venus', 'mars', 'jupiter',
+    'saturn', 'uranus', 'neptune', 'pluto', 'rahu', 'ketu'};
+  return known.contains(p) ? '$kWebsite/planet-icons-v2/$p.png' : null;
+}
+
+/// Small sign symbol — vedic-aware (hzsymbol vs zsymbol).
+class SignIcon extends StatelessWidget {
+  final int index;
+  final double size;
+  const SignIcon(this.index, {super.key, required this.size});
+  @override
+  Widget build(BuildContext context) => CachedNetworkImage(
+    imageUrl: signSymbolUrl(index, vedic: useVedic.value),
+    width: size, height: size, fit: BoxFit.contain,
+    placeholder: (_, __) => SizedBox(width: size, height: size),
+    errorWidget: (_, __, ___) => Text(signs[index].symbol,
+      style: TextStyle(fontSize: size * 0.8, color: kGold)));
+}
+
+/// Big artistic sign banner (Z/V artwork from /signs/).
+class SignArt extends StatelessWidget {
+  final ZSign sign;
+  final double height;
+  const SignArt(this.sign, {super.key, this.height = 170});
+  @override
+  Widget build(BuildContext context) {
+    final i = signs.indexOf(sign);
+    return ClipRRect(borderRadius: BorderRadius.circular(18),
+      child: CachedNetworkImage(
+        imageUrl: signArtUrl(i, vedic: useVedic.value),
+        height: height, width: double.infinity, fit: BoxFit.cover,
+        placeholder: (_, __) => Container(height: height, color: kBg),
+        errorWidget: (_, __, ___) => SizedBox(height: height,
+          child: Center(child: Text(sign.symbol,
+            style: TextStyle(fontSize: height * 0.35, color: kGold))))));
   }
 }
 
@@ -493,9 +542,7 @@ class TodayTab extends StatelessWidget {
                     borderRadius: BorderRadius.circular(99),
                     border: Border.all(color: sel ? kPrimary : kBorder)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Text(signs[i].symbol,
-                      style: TextStyle(fontSize: 18,
-                        color: sel ? Colors.white : kGold)),
+                    SignIcon(i, size: 22),
                     const SizedBox(width: 6),
                     Text(signName(signs[i]),
                       style: TextStyle(fontSize: 13,
@@ -523,21 +570,28 @@ class SignCard extends StatelessWidget {
   final ZSign sign;
   const SignCard({super.key, required this.sign});
 
-  Widget chip(String label, String value) => Container(
+  Widget chip(String label, String value, {String? iconUrl}) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
     decoration: BoxDecoration(color: kBg,
       borderRadius: BorderRadius.circular(99),
       border: Border.all(color: kBorder)),
-    child: Text('$label: $value',
-      style: const TextStyle(color: kMuted, fontSize: 12.5,
-        fontWeight: FontWeight.w600)));
+    child: Row(mainAxisSize: MainAxisSize.min, children: [
+      if (iconUrl != null) ...[
+        CachedNetworkImage(imageUrl: iconUrl, width: 16, height: 16,
+          errorWidget: (_, __, ___) => const SizedBox.shrink()),
+        const SizedBox(width: 5),
+      ],
+      Text('$label: $value',
+        style: const TextStyle(color: kMuted, fontSize: 12.5,
+          fontWeight: FontWeight.w600)),
+    ]));
 
   @override
   Widget build(BuildContext context) {
     final lang = currentLang.value;
     return card(child: Column(children: [
-      Text(sign.symbol, style: const TextStyle(fontSize: 54, color: kGold)),
-      const SizedBox(height: 6),
+      SignArt(sign),
+      const SizedBox(height: 12),
       Text(signName(sign),
         style: TextStyle(color: kOn, fontSize: 24,
           fontWeight: FontWeight.w800, fontFamily: urduFont)),
@@ -547,8 +601,9 @@ class SignCard extends StatelessWidget {
       const SizedBox(height: 12),
       Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
         children: [
-          chip(tr('element'), '${elementEmoji(sign.element)} ${tr(sign.element)}'),
-          chip(tr('planet'), sign.planet[lang] ?? sign.planet[AppLang.en]!),
+          chip(tr('element'), tr(sign.element)),
+          chip(tr('planet'), sign.planet[lang] ?? sign.planet[AppLang.en]!,
+            iconUrl: planetIconUrl(sign)),
         ]),
       const SizedBox(height: 14),
       Text(sign.trait[lang] ?? sign.trait[AppLang.en]!,
@@ -627,8 +682,7 @@ class ZodiacTab extends StatelessWidget {
                   border: Border.all(color: kBorder)),
                 child: Column(mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(signs[i].symbol,
-                      style: const TextStyle(fontSize: 34, color: kGold)),
+                    SignIcon(i, size: 44),
                     const SizedBox(height: 6),
                     Text(signName(signs[i]),
                       style: TextStyle(color: kOn, fontSize: 15,
@@ -663,9 +717,8 @@ void showSignSheet(BuildContext context, ZSign sign) {
                 decoration: BoxDecoration(color: kBorder,
                   borderRadius: BorderRadius.circular(99)))),
               const SizedBox(height: 16),
-              Center(child: Text(sign.symbol,
-                style: const TextStyle(fontSize: 60, color: kGold))),
-              const SizedBox(height: 6),
+              SignArt(sign, height: 190),
+              const SizedBox(height: 10),
               Center(child: Text(
                 '${sign.name[lang] ?? sign.name[AppLang.en]!}  ·  ${sign.vname[lang] ?? sign.vname[AppLang.en]!}',
                 style: TextStyle(color: kOn, fontSize: 22,
@@ -673,8 +726,7 @@ void showSignSheet(BuildContext context, ZSign sign) {
               const SizedBox(height: 14),
               _sheetRow(tr('western'), sign.westDates),
               _sheetRow(tr('vedic'), sign.vedicDates),
-              _sheetRow(tr('element'),
-                '${elementEmoji(sign.element)} ${tr(sign.element)}'),
+              _sheetRow(tr('element'), tr(sign.element)),
               _sheetRow(tr('planet'),
                 sign.planet[lang] ?? sign.planet[AppLang.en]!),
               const SizedBox(height: 14),
@@ -738,8 +790,7 @@ class _MatchTabState extends State<MatchTab> {
                 border: Border.all(color: kBorder)),
               child: Column(mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text(signs[i].symbol,
-                    style: const TextStyle(fontSize: 24, color: kGold)),
+                  SignIcon(i, size: 30),
                   const SizedBox(height: 4),
                   Text(signName(signs[i]),
                     style: TextStyle(color: kOn, fontSize: 11,
@@ -757,9 +808,10 @@ class _MatchTabState extends State<MatchTab> {
         border: Border.all(
           color: idx != null ? kPrimary : kBorder, width: 1.4)),
       child: Column(children: [
-        Text(idx != null ? signs[idx].symbol : '＋',
-          style: TextStyle(fontSize: 40,
-            color: idx != null ? kGold : kMuted)),
+        idx != null
+          ? SignIcon(idx, size: 46)
+          : const Text('＋',
+              style: TextStyle(fontSize: 40, color: kMuted)),
         const SizedBox(height: 6),
         Text(idx != null ? signName(signs[idx]) : label,
           style: TextStyle(color: idx != null ? kOn : kMuted,
@@ -802,7 +854,7 @@ class _MatchTabState extends State<MatchTab> {
             style: TextStyle(color: kGold, fontSize: 17,
               fontWeight: FontWeight.w800, fontFamily: urduFont)),
           const SizedBox(height: 6),
-          Text('${signName(signs[_a!])} ${signs[_a!].symbol}  +  ${signs[_b!].symbol} ${signName(signs[_b!])}',
+          Text('${signName(signs[_a!])}  +  ${signName(signs[_b!])}',
             textAlign: TextAlign.center,
             style: const TextStyle(color: kMuted, fontSize: 13.5)),
           const SizedBox(height: 16),
