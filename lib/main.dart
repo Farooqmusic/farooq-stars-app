@@ -674,7 +674,11 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
         '?s=${widget.sign.key}&period=today&lang=${currentLang.value.name}');
       final r = await http.get(uri).timeout(const Duration(seconds: 30));
       final d = jsonDecode(r.body) as Map<String, dynamic>;
-      final t = d['ok'] == true ? (d['text'] ?? '').toString().trim() : '';
+      // AstrologyAPI/translation text mein kabhi kabhi **markdown** ke
+      // sitare aa jate hain — card par khaam ** acha nahi lagta, saaf karo.
+      final t = d['ok'] == true
+        ? (d['text'] ?? '').toString().replaceAll('**', '').trim()
+        : '';
       if (t.isEmpty) throw Exception('empty');
       _memCache[k] = t;
       if (mounted) setState(() { _text = t; _loading = false; });
