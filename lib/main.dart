@@ -380,12 +380,19 @@ class SignArt extends StatelessWidget {
     final cardArt = CachedNetworkImage(
       imageUrl: signArtUrl(i, vedic: useVedic.value),
       fit: BoxFit.contain,
+      // Decode at a sane size — the source signs art is ~700px, no need to
+      // hold the full bitmap in memory.
+      memCacheWidth: 720,
       placeholder: (_, __) => Container(color: kBg),
       errorWidget: (_, __, ___) => fallback);
     final img = hero
       ? CachedNetworkImage(
           imageUrl: signBigArtUrl(i),
           fit: BoxFit.contain,
+          // The root artwork is 2816px wide (2–9 MB). Decoding it at full
+          // resolution can exhaust memory on some phones and crash the app;
+          // 1200px is plenty for a banner and keeps memory low.
+          memCacheWidth: 1200,
           placeholder: (_, __) => cardArt,
           errorWidget: (_, __, ___) => cardArt)
       : cardArt;
@@ -681,16 +688,26 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
   Widget build(BuildContext context) {
     final sign = widget.sign;
     final vedic = useVedic.value;
+    final lang = currentLang.value;
     final accent = elementColor(sign.element);
     final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
     final sg = sys?['signs']?[sign.key] as Map<String, dynamic>?;
     final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
 
+    // On the Vedic (rashi) side show the Sanskrit name transliterated in
+    // English with the familiar Western name in brackets, e.g. "Kanya (Virgo)"
+    // — nicer for the public. Western side just shows the sign name.
+    final vName = sign.vname[lang] ?? sign.vname[AppLang.en]!;
+    final wName = sign.name[lang] ?? sign.name[AppLang.en]!;
+    final headerName = vedic
+      ? (vName == wName ? vName : '$vName ($wName)')
+      : signName(sign);
+
     final children = <Widget>[
       SignArt(sign, hero: true),
       const SizedBox(height: 14),
       // name — left aligned like the website
-      Text(signName(sign),
+      Text(headerName,
         style: TextStyle(color: kOn, fontSize: 26,
           fontWeight: FontWeight.w800, fontFamily: urduFont)),
       const SizedBox(height: 5),
@@ -707,10 +724,16 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
           child: Padding(padding: const EdgeInsets.all(2),
             child: Icon(Icons.info_outline, color: accent, size: 17))),
       ]),
+      // the short one-liner tagline — restored (people liked it)
+      const SizedBox(height: 12),
+      Text(sign.trait[lang] ?? sign.trait[AppLang.en]!,
+        style: TextStyle(color: Colors.white, fontSize: 14.5, height: 1.7,
+          fontWeight: FontWeight.w500, fontFamily: urduFont)),
     ];
 
     if (sg != null) {
-      final order = (sys!['order'] as List).cast<String>();
+      final order = ((sys?['order'] ?? const <dynamic>[]) as List)
+        .cast<String>();
       final traits = lx(sg['traits']).split('·')
         .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
       if (traits.isNotEmpty) {
@@ -752,8 +775,8 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
           children: ((sg['colors'] ?? []) as List).map((ck) {
             final cm = sys['col']?[ck] as Map<String, dynamic>?;
             final hex = (cm?['h'] ?? '#888888') as String;
-            final col = Color(int.parse(
-              'ff${hex.replaceFirst('#', '')}', radix: 16));
+            final col = Color(int.tryParse(
+              'ff${hex.replaceFirst('#', '')}', radix: 16) ?? 0xff888888);
             return Row(mainAxisSize: MainAxisSize.min, children: [
               Container(width: 12, height: 12,
                 decoration: BoxDecoration(color: col, shape: BoxShape.circle)),
@@ -1298,6 +1321,7 @@ const Map<String, Map<String, String>> _lcT = {
   'vIntro': {'en': 'Enter any year to see the Vedic (Sidereal / Lahiri) rashi dates and whether that year is leap or common.', 'ur': 'کوئی بھی سال درج کریں اور وید (Sidereal / لاہڑی) راشیوں کی تاریخیں دیکھیں، ساتھ ہی یہ کہ وہ سال لیپ تھا یا عام۔', 'hi': 'कोई भी वर्ष दर्ज करें और वैदिक (निरयन / लाहिड़ी) राशि तिथियाँ देखें, साथ ही वह वर्ष लीप था या सामान्य।', 'ar': 'أدخل أيّ سنة لرؤية تواريخ الراشي الفيدية (الفلكية / لاهيري) وما إذا كانت السنة كبيسة أو عاديّة.'},
   'yearLbl': {'en': 'Enter Year:', 'ur': 'سال درج کریں:', 'hi': 'वर्ष दर्ज करें:', 'ar': 'أدخل السنة:'},
   'calc': {'en': 'Calculate', 'ur': 'حساب لگائیں', 'hi': 'गणना करें', 'ar': 'احسب'},
+  'backTop': {'en': '↑ Back to top', 'ur': '↑ اوپر جائیں', 'hi': '↑ ऊपर जाएँ', 'ar': '↑ العودة إلى الأعلى'},
   'leap': {'en': 'Leap Year — 366 days', 'ur': 'لیپ سال — ۳۶۶ دن', 'hi': 'लीप वर्ष — 366 दिन', 'ar': 'سنة كبيسة — ٣٦٦ يومًا'},
   'common': {'en': 'Common Year — 365 days', 'ur': 'عام سال — ۳۶۵ دن', 'hi': 'सामान्य वर्ष — 365 दिन', 'ar': 'سنة عاديّة — ٣٦٥ يومًا'},
   'thSign': {'en': 'Sign', 'ur': 'برج', 'hi': 'राशि', 'ar': 'البرج'},
@@ -1318,6 +1342,7 @@ class DateCalculatorScreen extends StatefulWidget {
 
 class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
   late final TextEditingController _yc;
+  final ScrollController _sc = ScrollController();
   late int _year;
 
   @override
@@ -1328,7 +1353,19 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
   }
 
   @override
-  void dispose() { _yc.dispose(); super.dispose(); }
+  void dispose() { _yc.dispose(); _sc.dispose(); super.dispose(); }
+
+  void _toTop() => _sc.animateTo(0,
+    duration: const Duration(milliseconds: 350), curve: Curves.easeOut);
+
+  // Real image icon for each sign (same /app/icons/ files the rest of the app
+  // uses) — NOT a unicode glyph, so it looks identical on every device.
+  Widget _signIcon(int i) => CachedNetworkImage(
+    imageUrl: signSymbolUrl(i, vedic: widget.vedic),
+    width: 22, height: 22, fit: BoxFit.contain,
+    placeholder: (_, __) => const SizedBox(width: 22, height: 22),
+    errorWidget: (_, __, ___) => Text(signs[i].symbol,
+      style: const TextStyle(color: kGold, fontSize: 15)));
 
   bool _isLeap(int y) => (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
 
@@ -1409,9 +1446,8 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
           border: const Border(top: BorderSide(color: kBorder, width: 0.6))),
         child: Row(children: [
           _cell(Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(s['sym'] as String,
-              style: const TextStyle(color: kGold, fontSize: 15)),
-            const SizedBox(width: 7),
+            _signIcon(i),
+            const SizedBox(width: 8),
             Flexible(child: Text(nm2,
               style: TextStyle(color: kOn, fontSize: 13,
                 fontWeight: FontWeight.w700, fontFamily: urduFont))),
@@ -1436,6 +1472,7 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
         body: Center(child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 680),
           child: ListView(
+            controller: _sc,
             padding: EdgeInsets.fromLTRB(18, 12, 18,
               28 + MediaQuery.of(context).viewPadding.bottom),
             children: [
@@ -1511,6 +1548,19 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
               Text(_stripB(ved ? t('vExp') : t('wExp')),
                 style: TextStyle(color: kOn, fontSize: 13.5, height: 1.85,
                   fontFamily: urduFont)),
+              const SizedBox(height: 22),
+              Center(child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kLight,
+                  side: const BorderSide(color: kBorder),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 22, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(99))),
+                onPressed: _toTop,
+                child: Text(t('backTop'),
+                  style: TextStyle(fontWeight: FontWeight.w700,
+                    fontFamily: urduFont)))),
             ])))));
   }
 }
