@@ -23,6 +23,8 @@ dependencies:
   shared_preferences: ^2.3.2
   share_plus: ^13.1.0
   package_info_plus: ^10.2.0
+  # ---- In-app browser for the big Live Sky charts + calendars (Build 13) ----
+  webview_flutter: ^4.7.0
 
 dev_dependencies:
   flutter_test:

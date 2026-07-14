@@ -22,6 +22,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 // ---- Brand palette (same family as farooqstars.com & Farooq Music) ----
 const kBg      = Color(0xFF1a0e22);
@@ -822,6 +823,146 @@ const Map<String, Map<AppLang, String>> _planetNamesLive = {
 };
 
 // ===========================================================================
+// Build 13: in-app web view — hosts the big Live Sky charts (circle + box +
+// Ascendant) and the calendars page inside the app.
+// ===========================================================================
+class WebViewScreen extends StatefulWidget {
+  final String url, title;
+  const WebViewScreen({super.key, required this.url, required this.title});
+  @override
+  State<WebViewScreen> createState() => _WebViewScreenState();
+}
+
+class _WebViewScreenState extends State<WebViewScreen> {
+  late final WebViewController _c;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _c = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(kBg)
+      ..setNavigationDelegate(NavigationDelegate(
+        onPageFinished: (_) { if (mounted) setState(() => _loading = false); }))
+      ..loadRequest(Uri.parse(widget.url));
+  }
+
+  @override
+  Widget build(BuildContext context) => Directionality(
+    textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+    child: Scaffold(
+      backgroundColor: kBg,
+      appBar: AppBar(
+        backgroundColor: kBg, elevation: 0,
+        iconTheme: const IconThemeData(color: kGold),
+        actions: [
+          IconButton(icon: const Icon(Icons.open_in_new, color: kGold, size: 20),
+            tooltip: 'Open in browser',
+            onPressed: () => openUrl(widget.url)),
+        ],
+        title: Text(widget.title,
+          style: TextStyle(color: kGold, fontSize: 18,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+      body: Stack(children: [
+        WebViewWidget(controller: _c),
+        if (_loading)
+          const Center(child: CircularProgressIndicator(color: kPrimary)),
+      ])));
+}
+
+// ===========================================================================
+// Build 13: "today's reading" quick access. Sun -> 12 Western signs, Moon ->
+// 12 Vedic rashis; pick one and read only TODAY's reading (same source as the
+// Zodiac tab) without going into the Zodiac tab.
+// ===========================================================================
+class DailyPickerScreen extends StatelessWidget {
+  final bool vedic;
+  const DailyPickerScreen({super.key, required this.vedic});
+
+  @override
+  Widget build(BuildContext context) {
+    final l = currentLang.value;
+    final title = vedic
+      ? {AppLang.en: 'Moon · Today\'s Reading', AppLang.ur: 'چاند · آج کی reading', AppLang.hi: 'चंद्र · आज की reading', AppLang.ar: 'القمر · قراءة اليوم'}[l]!
+      : {AppLang.en: 'Sun · Today\'s Reading', AppLang.ur: 'سورج · آج کی reading', AppLang.hi: 'सूर्य · आज की reading', AppLang.ar: 'الشمس · قراءة اليوم'}[l]!;
+    return Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(title, style: TextStyle(color: kGold, fontSize: 17,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: Center(child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 900),
+          child: LayoutBuilder(builder: (_, box) {
+            final cols = (box.maxWidth / 170).floor().clamp(2, 5);
+            return GridView.builder(
+              padding: EdgeInsets.fromLTRB(20, 16, 20,
+                24 + MediaQuery.of(context).viewPadding.bottom),
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: cols, mainAxisSpacing: 12,
+                crossAxisSpacing: 12, childAspectRatio: 1.02),
+              itemCount: signs.length,
+              itemBuilder: (ctx, i) {
+                final name = vedic
+                  ? (signs[i].vname[l] ?? signs[i].vname[AppLang.en]!)
+                  : (signs[i].name[l] ?? signs[i].name[AppLang.en]!);
+                return GestureDetector(
+                  onTap: () => Navigator.push(ctx, MaterialPageRoute(
+                    builder: (_) => DailyReadingScreen(
+                      sign: signs[i], vedic: vedic))),
+                  child: Container(
+                    decoration: BoxDecoration(color: kCard,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: kBorder)),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: signSymbolUrl(i, vedic: vedic),
+                          width: 44, height: 44, fit: BoxFit.contain,
+                          errorWidget: (_, __, ___) => Text(signs[i].symbol,
+                            style: const TextStyle(fontSize: 34, color: kGold))),
+                        const SizedBox(height: 6),
+                        Text(name, style: TextStyle(color: kOn, fontSize: 15,
+                          fontWeight: FontWeight.w700, fontFamily: urduFont)),
+                      ])));
+              });
+          })))));
+  }
+}
+
+class DailyReadingScreen extends StatelessWidget {
+  final ZSign sign;
+  final bool vedic;
+  const DailyReadingScreen({super.key, required this.sign, required this.vedic});
+
+  @override
+  Widget build(BuildContext context) {
+    final l = currentLang.value;
+    final name = vedic
+      ? (sign.vname[l] ?? sign.vname[AppLang.en]!)
+      : (sign.name[l] ?? sign.name[AppLang.en]!);
+    return Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(name, style: TextStyle(color: kGold, fontSize: 18,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: CenteredList(children: [
+          DailyReadingCard(
+            key: ValueKey('daily-${sign.key}-${currentLang.value.name}'),
+            sign: sign, dailyOnly: true),
+        ])));
+  }
+}
+
+// ===========================================================================
 // NEW Today tab — Live Sky (Western + Vedic) and Rahu Kaal, refreshed live.
 // ===========================================================================
 class LiveSkyTab extends StatefulWidget {
@@ -867,9 +1008,11 @@ class _LiveSkyTabState extends State<LiveSkyTab> {
       .map((k) => _planetNamesLive[k]?[l] ?? k).join('، ');
     final url = vedic ? '$kWebsite/farooq-vedic.html'
       : '$kWebsite/farooq-western.html';
+    final title = _skyEyebrow[vedic ? 'ved' : 'west']![l]!;
 
     return GestureDetector(
-      onTap: () => openUrl(url),
+      onTap: () => Navigator.push(context, MaterialPageRoute(
+        builder: (_) => WebViewScreen(url: url, title: title))),
       child: card(child: Column(
         crossAxisAlignment: CrossAxisAlignment.center, children: [
           Text(_skyEyebrow[vedic ? 'ved' : 'west']![l]!,
@@ -931,6 +1074,54 @@ class _LiveSkyTabState extends State<LiveSkyTab> {
       ]));
   }
 
+  // Item 4: Sun / Moon "today's reading" split card.
+  Widget _dailyCard() {
+    final l = currentLang.value;
+    final sunLabel = {AppLang.en: "Sun\nToday's Reading", AppLang.ur: 'سورج\nآج کی reading', AppLang.hi: 'सूर्य\nआज की reading', AppLang.ar: 'الشمس\nقراءة اليوم'}[l]!;
+    final moonLabel = {AppLang.en: "Moon\nToday's Reading", AppLang.ur: 'چاند\nآج کی reading', AppLang.hi: 'चंद्र\nआज की reading', AppLang.ar: 'القمر\nقراءة اليوم'}[l]!;
+    Widget half(String file, String label, bool vedic) => Expanded(
+      child: GestureDetector(
+        onTap: () => Navigator.push(context, MaterialPageRoute(
+          builder: (_) => DailyPickerScreen(vedic: vedic))),
+        child: Container(
+          color: Colors.transparent,
+          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 8),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            CachedNetworkImage(
+              imageUrl: '$kWebsite/app/planet-icons-v2/$file',
+              width: 34, height: 34, fit: BoxFit.contain,
+              errorWidget: (_, __, ___) => const SizedBox(width: 34, height: 34)),
+            const SizedBox(height: 10),
+            Text(label, textAlign: TextAlign.center,
+              style: TextStyle(color: kOn, fontSize: 13, height: 1.4,
+                fontWeight: FontWeight.w700, fontFamily: urduFont)),
+          ]))));
+    return card(padding: EdgeInsets.zero,
+      child: IntrinsicHeight(child: Row(children: [
+        half('sun.png', sunLabel, false),
+        Container(width: 1, color: kBorder),
+        half('moon.png', moonLabel, true),
+      ])));
+  }
+
+  // Item 5: Calendars (opens the site's calendars page in-app).
+  Widget _calendarCard() {
+    final l = currentLang.value;
+    final label = {AppLang.en: 'World Calendars', AppLang.ur: 'کیلنڈرز', AppLang.hi: 'कैलेंडर', AppLang.ar: 'التقاويم'}[l]!;
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(
+        builder: (_) => WebViewScreen(
+          url: '$kWebsite/farooq-calendars.html', title: label))),
+      child: card(child: Row(children: [
+        const Text('🗓️', style: TextStyle(fontSize: 24)),
+        const SizedBox(width: 14),
+        Expanded(child: Text(label,
+          style: TextStyle(color: kOn, fontSize: 16,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        const Icon(Icons.chevron_right, color: kMuted),
+      ])));
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = currentLang.value;
@@ -941,9 +1132,11 @@ class _LiveSkyTabState extends State<LiveSkyTab> {
         child: Text(todayLine(), textAlign: TextAlign.center,
           style: TextStyle(color: kGold, fontSize: 15,
             fontWeight: FontWeight.w700, fontFamily: urduFont))),
-      _skyCard(false, sky),
-      _skyCard(true, sky),
-      _rahuBar(rahu, l),
+      _skyCard(false, sky),   // 1 · Western Live Sky
+      _skyCard(true, sky),    // 2 · Vedic Live Sky
+      _rahuBar(rahu, l),      // 3 · Rahu Kaal
+      _dailyCard(),           // 4 · Sun / Moon today's reading
+      _calendarCard(),        // 5 · Calendars
     ]);
   }
 }
@@ -1209,7 +1402,8 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
 
 class DailyReadingCard extends StatefulWidget {
   final ZSign sign;
-  const DailyReadingCard({super.key, required this.sign});
+  final bool dailyOnly; // Build 13: lock to Today, hide the period pills
+  const DailyReadingCard({super.key, required this.sign, this.dailyOnly = false});
   @override
   State<DailyReadingCard> createState() => _DailyReadingCardState();
 }
@@ -1349,29 +1543,31 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
             onPressed: () { _memCache.remove(_cacheKey); _load(); }),
         ]),
         const SizedBox(height: 8),
-        // Period selector — Today / Week / Month / Year
-        Wrap(spacing: 6, runSpacing: 6, children:
-          ['today', 'week', 'month', 'year'].map((p) {
-            final sel = p == _period;
-            return GestureDetector(
-              onTap: () {
-                if (_period == p) return;
-                setState(() => _period = p);
-                _load();
-              },
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: sel ? kPrimary : kBg,
-                  borderRadius: BorderRadius.circular(99),
-                  border: Border.all(color: sel ? kPrimary : kBorder)),
-                child: Text(tr('p_$p'),
-                  style: TextStyle(
-                    color: sel ? Colors.white : kMuted, fontSize: 12.5,
-                    fontWeight: FontWeight.w700, fontFamily: urduFont))));
-          }).toList()),
-        const SizedBox(height: 10),
+        // Period selector — Today / Week / Month / Year (hidden when dailyOnly)
+        if (!widget.dailyOnly) ...[
+          Wrap(spacing: 6, runSpacing: 6, children:
+            ['today', 'week', 'month', 'year'].map((p) {
+              final sel = p == _period;
+              return GestureDetector(
+                onTap: () {
+                  if (_period == p) return;
+                  setState(() => _period = p);
+                  _load();
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: sel ? kPrimary : kBg,
+                    borderRadius: BorderRadius.circular(99),
+                    border: Border.all(color: sel ? kPrimary : kBorder)),
+                  child: Text(tr('p_$p'),
+                    style: TextStyle(
+                      color: sel ? Colors.white : kMuted, fontSize: 12.5,
+                      fontWeight: FontWeight.w700, fontFamily: urduFont))));
+            }).toList()),
+          const SizedBox(height: 10),
+        ],
         if (_loading)
           const Padding(padding: EdgeInsets.symmetric(vertical: 20),
             child: Center(child: SizedBox(width: 26, height: 26,
