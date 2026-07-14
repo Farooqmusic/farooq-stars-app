@@ -692,7 +692,7 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
     final accent = elementColor(sign.element);
     final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
     final sg = sys?['signs']?[sign.key] as Map<String, dynamic>?;
-    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
+    final rows = (sys?['rows'] ?? <String, dynamic>{}) as Map<String, dynamic>;
 
     // On the Vedic (rashi) side show the Sanskrit name transliterated in
     // English with the familiar Western name in brackets, e.g. "Kanya (Virgo)"
@@ -1005,8 +1005,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
     final sk = widget.sign.key;
     final sg = sys?['signs']?[sk] as Map<String, dynamic>?;
-    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
-    final tabs = (sys?['tabs'] ?? {}) as Map<String, dynamic>;
+    final rows = (sys?['rows'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+    final tabs = (sys?['tabs'] ?? <String, dynamic>{}) as Map<String, dynamic>;
     final lang = currentLang.value;
 
     Widget body;
@@ -1022,7 +1022,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final order = (sys!['order'] as List).cast<String>();
       final traits = lx(sg['traits']).split('·')
         .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
-      final details = (sg['details'] ?? {}) as Map<String, dynamic>;
+      final details = (sg['details'] ?? <String, dynamic>{}) as Map<String, dynamic>;
       const tabOrder = ['general', 'career', 'love', 'health',
         'gems', 'dark', 'family', 'karma'];
 
@@ -1261,8 +1261,8 @@ class _SignReadingsState extends State<SignReadings> {
     final accent = elementColor(widget.sign.element);
     final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
     final sg = sys?['signs']?[widget.sign.key] as Map<String, dynamic>?;
-    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
-    final tabs = (sys?['tabs'] ?? {}) as Map<String, dynamic>;
+    final rows = (sys?['rows'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+    final tabs = (sys?['tabs'] ?? <String, dynamic>{}) as Map<String, dynamic>;
 
     if (_failed) {
       return card(child: Text(tr('readingError'), textAlign: TextAlign.center,
@@ -1276,7 +1276,7 @@ class _SignReadingsState extends State<SignReadings> {
           child: CircularProgressIndicator(strokeWidth: 3, color: kPrimary)))));
     }
 
-    final details = (sg['details'] ?? {}) as Map<String, dynamic>;
+    final details = (sg['details'] ?? <String, dynamic>{}) as Map<String, dynamic>;
     const tabOrder = ['general', 'career', 'love', 'health',
       'gems', 'dark', 'family', 'karma'];
 
