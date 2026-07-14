@@ -790,20 +790,30 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
           alignment: WrapAlignment.end,
           children: ((sg['compat'] ?? []) as List).map((mk) {
             final mi = order.indexOf(mk as String);
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: kBg,
-                borderRadius: BorderRadius.circular(99),
-                border: Border.all(color: kBorder)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (mi >= 0) ...[
-                  SignIcon(mi, size: 16),
-                  const SizedBox(width: 5),
-                ],
-                Text(lx(sys['sname']?[mk]),
-                  style: TextStyle(color: kOn, fontSize: 12.5,
-                    fontWeight: FontWeight.w700, fontFamily: urduFont)),
-              ]));
+            return GestureDetector(
+              onTap: mi >= 0
+                ? () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => SignDetailScreen(sign: signs[mi])))
+                : null,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(color: kBg,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: kBorder)),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  if (mi >= 0) ...[
+                    SignIcon(mi, size: 16),
+                    const SizedBox(width: 5),
+                  ],
+                  Text(lx(sys['sname']?[mk]),
+                    style: TextStyle(color: kOn, fontSize: 12.5,
+                      fontWeight: FontWeight.w700, fontFamily: urduFont)),
+                  if (mi >= 0) ...[
+                    const SizedBox(width: 3),
+                    Icon(Icons.chevron_right, size: 14, color: kMuted),
+                  ],
+                ])));
           }).toList())),
       ]);
     }
@@ -1084,22 +1094,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 alignment: WrapAlignment.end,
                 children: ((sg['compat'] ?? []) as List).map((mk) {
                   final mi = order.indexOf(mk as String);
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(color: kBg,
-                      borderRadius: BorderRadius.circular(99),
-                      border: Border.all(color: kBorder)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                      if (mi >= 0) ...[
-                        SignIcon(mi, size: 16),
-                        const SizedBox(width: 5),
-                      ],
-                      Text(lx(sys['sname']?[mk]),
-                        style: TextStyle(color: kOn, fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: urduFont)),
-                    ]));
+                  return GestureDetector(
+                    onTap: mi >= 0
+                      ? () => Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => SignDetailScreen(sign: signs[mi])))
+                      : null,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(color: kBg,
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: kBorder)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        if (mi >= 0) ...[
+                          SignIcon(mi, size: 16),
+                          const SizedBox(width: 5),
+                        ],
+                        Text(lx(sys['sname']?[mk]),
+                          style: TextStyle(color: kOn, fontSize: 12.5,
+                            fontWeight: FontWeight.w700,
+                            fontFamily: urduFont)),
+                        if (mi >= 0) ...[
+                          const SizedBox(width: 3),
+                          Icon(Icons.chevron_right, size: 14, color: kMuted),
+                        ],
+                      ])));
                 }).toList())),
             ])),
             const SizedBox(height: 16),
@@ -1275,6 +1294,32 @@ class _SignReadingsState extends State<SignReadings> {
             height: 1.95, fontFamily: urduFont)))),
     ]);
   }
+}
+
+// ===========================================================================
+// Build 9: full-screen view of ONE sign, using the same header + readings as
+// the Today page (consistent look). Opened by tapping a "best match" chip.
+// ===========================================================================
+class SignDetailScreen extends StatelessWidget {
+  final ZSign sign;
+  const SignDetailScreen({super.key, required this.sign});
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
+    valueListenable: useVedic,
+    builder: (_, __, ___) => Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(signName(sign),
+            style: TextStyle(color: kGold, fontSize: 18,
+              fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: CenteredList(children: [
+          SignHeaderCard(key: ValueKey('dh-${sign.key}'), sign: sign),
+          SignReadings(key: ValueKey('dr-${sign.key}'), sign: sign),
+        ]))));
 }
 
 // ===========================================================================
