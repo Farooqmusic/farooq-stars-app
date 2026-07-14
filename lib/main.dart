@@ -337,6 +337,19 @@ String? planetIconUrl(ZSign s) {
   return known.contains(p) ? '$kWebsite/app/planet-icons-v2/$p.png' : null;
 }
 
+// The website's per-element accent colour (CSS --fire/--earth/--air/--water).
+// Used to tint the dates line, trait chips and the Personality heading so the
+// app matches the zodiac / rashi pages exactly.
+Color elementColor(String element) {
+  switch (element.toLowerCase()) {
+    case 'fire':  return const Color(0xFFff6b6b);
+    case 'earth': return const Color(0xFF57d39a);
+    case 'air':   return const Color(0xFFffd56b);
+    case 'water': return const Color(0xFF5aa9e6);
+    default:      return kGold;
+  }
+}
+
 /// Small sign symbol — vedic-aware (hzsymbol vs zsymbol).
 class SignIcon extends StatelessWidget {
   final int index;
@@ -600,15 +613,15 @@ class TodayTab extends StatelessWidget {
             })),
           const SizedBox(height: 18),
           if (sign != null) ...[
-            SignCard(sign: sign),
+            // Build 7: website-style header — banner, left-aligned name,
+            // element-coloured dates + info icon, trait chips, and the full
+            // details table, all together at the top.
+            SignHeaderCard(key: ValueKey('hdr-${sign.key}'), sign: sign),
             DailyReadingCard(
               key: ValueKey('read-${sign.key}-${currentLang.value.name}'),
               sign: sign),
-            // Build 6: full sign profile inline on the Today page — no more
-            // tapping the picture. Details table + Personality + 8 sections,
-            // each collapsible to stay compact.
-            SignProfileSection(
-              key: ValueKey('prof-${sign.key}'), sign: sign),
+            // Personality + the 8 sections, each a collapsible dropdown.
+            SignReadings(key: ValueKey('rd-${sign.key}'), sign: sign),
           ] else
             card(child: Column(children: [
               const Text('✨', style: TextStyle(fontSize: 40)),
@@ -621,51 +634,159 @@ class TodayTab extends StatelessWidget {
       }));
 }
 
-class SignCard extends StatelessWidget {
+// ===========================================================================
+// Build 7: website-style header card. Banner, left-aligned name, dates in the
+// element accent colour with an ⓘ that opens the Date Calculator, trait chips
+// (accent-tinted) and the full details table — all in one panel at the top.
+// ===========================================================================
+class SignHeaderCard extends StatefulWidget {
   final ZSign sign;
-  const SignCard({super.key, required this.sign});
+  const SignHeaderCard({super.key, required this.sign});
+  @override
+  State<SignHeaderCard> createState() => _SignHeaderCardState();
+}
 
-  Widget chip(String label, String value, {String? iconUrl}) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-    decoration: BoxDecoration(color: kBg,
-      borderRadius: BorderRadius.circular(99),
-      border: Border.all(color: kBorder)),
-    child: Row(mainAxisSize: MainAxisSize.min, children: [
-      if (iconUrl != null) ...[
-        CachedNetworkImage(imageUrl: iconUrl, width: 16, height: 16,
-          errorWidget: (_, __, ___) => const SizedBox.shrink()),
-        const SizedBox(width: 5),
-      ],
-      Text('$label: $value',
-        style: const TextStyle(color: kMuted, fontSize: 12.5,
-          fontWeight: FontWeight.w600)),
+class _SignHeaderCardState extends State<SignHeaderCard> {
+  Map<String, dynamic>? _all;
+
+  @override
+  void initState() {
+    super.initState();
+    loadProfiles().then((d) {
+      if (mounted) setState(() => _all = d);
+    });
+  }
+
+  String lx(dynamic m) {
+    if (m is Map) {
+      return (m[currentLang.value.name] ?? m['en'] ?? '').toString();
+    }
+    return m == null ? '' : m.toString();
+  }
+
+  Widget _row(String label, Widget value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(flex: 2, child: Text(label,
+        style: TextStyle(color: kMuted, fontSize: 13.5, fontFamily: urduFont))),
+      Expanded(flex: 3, child: Align(
+        alignment: AlignmentDirectional.centerEnd, child: value)),
     ]));
+
+  Widget _txt(String t) => Text(t, textAlign: TextAlign.end,
+    style: TextStyle(color: kOn, fontSize: 13.5, fontWeight: FontWeight.w600,
+      fontFamily: urduFont));
 
   @override
   Widget build(BuildContext context) {
-    final lang = currentLang.value;
-    return card(child: Column(children: [
+    final sign = widget.sign;
+    final vedic = useVedic.value;
+    final accent = elementColor(sign.element);
+    final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
+    final sg = sys?['signs']?[sign.key] as Map<String, dynamic>?;
+    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
+
+    final children = <Widget>[
       SignArt(sign, hero: true),
-      const SizedBox(height: 10),
-      Text(signName(sign),
-        style: TextStyle(color: kOn, fontSize: 24,
-          fontWeight: FontWeight.w800, fontFamily: urduFont)),
-      const SizedBox(height: 4),
-      Text(signDates(sign),
-        style: const TextStyle(color: kMuted, fontSize: 13)),
-      const SizedBox(height: 12),
-      Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
-        children: [
-          chip(tr('element'), tr(sign.element)),
-          chip(tr('planet'), sign.planet[lang] ?? sign.planet[AppLang.en]!,
-            iconUrl: planetIconUrl(sign)),
-        ]),
       const SizedBox(height: 14),
-      Text(sign.trait[lang] ?? sign.trait[AppLang.en]!,
-        textAlign: TextAlign.center,
-        style: TextStyle(color: Colors.white, fontSize: 15, height: 1.9,
-          fontWeight: FontWeight.w500, fontFamily: urduFont)),
-    ]));
+      // name — left aligned like the website
+      Text(signName(sign),
+        style: TextStyle(color: kOn, fontSize: 26,
+          fontWeight: FontWeight.w800, fontFamily: urduFont)),
+      const SizedBox(height: 5),
+      // dates in the element accent colour + ⓘ opening the Date Calculator
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text(signDates(sign),
+          style: TextStyle(color: accent, fontSize: 14,
+            fontWeight: FontWeight.w700, fontFamily: urduFont)),
+        const SizedBox(width: 6),
+        InkWell(
+          onTap: () => Navigator.push(context, MaterialPageRoute(
+            builder: (_) => DateCalculatorScreen(vedic: vedic))),
+          borderRadius: BorderRadius.circular(99),
+          child: Padding(padding: const EdgeInsets.all(2),
+            child: Icon(Icons.info_outline, color: accent, size: 17))),
+      ]),
+    ];
+
+    if (sg != null) {
+      final order = (sys!['order'] as List).cast<String>();
+      final traits = lx(sg['traits']).split('·')
+        .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+      if (traits.isNotEmpty) {
+        children.addAll([
+          const SizedBox(height: 12),
+          Align(alignment: AlignmentDirectional.centerStart,
+            child: Wrap(spacing: 8, runSpacing: 8,
+              children: traits.map((t) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Color.alphaBlend(accent.withOpacity(0.16), kCard),
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: accent.withOpacity(0.40))),
+                child: Text(t, style: TextStyle(color: kOn,
+                  fontSize: 12.5, fontWeight: FontWeight.w700,
+                  fontFamily: urduFont)))).toList())),
+        ]);
+      }
+      children.addAll([
+        const SizedBox(height: 14),
+        Divider(color: kBorder, height: 1),
+        const SizedBox(height: 6),
+        _row(lx(rows['dates']), _txt(lx(sg['dates']))),
+        _row(lx(rows['element']), _txt(lx(sys['el']?[sg['el']]))),
+        _row(lx(rows['quality']), _txt(lx(sys['qu']?[sg['qu']]))),
+        _row(lx(rows['ruler']), _txt(((sg['ruler'] ?? []) as List)
+          .map((r) => lx(sys['pl']?[r])).join(' · '))),
+        _row(lx(rows['day']), _txt(lx(sys['day']?[sg['day']]))),
+        _row(lx(rows['numbers']), Wrap(spacing: 6, alignment: WrapAlignment.end,
+          children: ((sg['nums'] ?? []) as List).map((n) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: kBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kBorder)),
+            child: Text('$n', style: const TextStyle(color: kOn,
+              fontSize: 13, fontWeight: FontWeight.w700)))).toList())),
+        _row(lx(rows['colors']), Wrap(spacing: 10, runSpacing: 4,
+          alignment: WrapAlignment.end,
+          children: ((sg['colors'] ?? []) as List).map((ck) {
+            final cm = sys['col']?[ck] as Map<String, dynamic>?;
+            final hex = (cm?['h'] ?? '#888888') as String;
+            final col = Color(int.parse(
+              'ff${hex.replaceFirst('#', '')}', radix: 16));
+            return Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 12, height: 12,
+                decoration: BoxDecoration(color: col, shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Text(lx(cm), style: TextStyle(color: kOn,
+                fontSize: 13, fontWeight: FontWeight.w600,
+                fontFamily: urduFont)),
+            ]);
+          }).toList())),
+        _row(lx(rows['compat']), Wrap(spacing: 6, runSpacing: 6,
+          alignment: WrapAlignment.end,
+          children: ((sg['compat'] ?? []) as List).map((mk) {
+            final mi = order.indexOf(mk as String);
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: kBg,
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(color: kBorder)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (mi >= 0) ...[
+                  SignIcon(mi, size: 16),
+                  const SizedBox(width: 5),
+                ],
+                Text(lx(sys['sname']?[mk]),
+                  style: TextStyle(color: kOn, fontSize: 12.5,
+                    fontWeight: FontWeight.w700, fontFamily: urduFont)),
+              ]));
+          }).toList())),
+      ]);
+    }
+
+    return card(child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start, children: children));
   }
 }
 
@@ -1059,20 +1180,19 @@ class _DropSectionState extends State<DropSection> {
 }
 
 // ===========================================================================
-// Build 6: FULL SIGN PROFILE, inline on the Today page. Same content as the
-// ProfileScreen (details table + personality + 8 sections, all 4 languages),
-// but Personality and the 8 sections are collapsible dropdowns. The banner,
-// name, dates, chips and tagline already sit above (in SignCard), so this
-// starts at the trait chips.
+// Build 7: Personality + the 8 sections, each a collapsible dropdown. Details
+// table and trait chips now live in SignHeaderCard above; this starts at
+// Personality. Personality's heading uses the element accent colour (like the
+// website .pers h3); the 8 sections stay gold.
 // ===========================================================================
-class SignProfileSection extends StatefulWidget {
+class SignReadings extends StatefulWidget {
   final ZSign sign;
-  const SignProfileSection({super.key, required this.sign});
+  const SignReadings({super.key, required this.sign});
   @override
-  State<SignProfileSection> createState() => _SignProfileSectionState();
+  State<SignReadings> createState() => _SignReadingsState();
 }
 
-class _SignProfileSectionState extends State<SignProfileSection> {
+class _SignReadingsState extends State<SignReadings> {
   Map<String, dynamic>? _all;
   bool _failed = false;
 
@@ -1091,28 +1211,12 @@ class _SignProfileSectionState extends State<SignProfileSection> {
     return m == null ? '' : m.toString();
   }
 
-  Widget _row(String label, Widget value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 7),
-    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Expanded(flex: 2, child: Text(label,
-        style: TextStyle(color: kMuted, fontSize: 13.5,
-          fontFamily: urduFont))),
-      Expanded(flex: 3, child: Align(
-        alignment: AlignmentDirectional.centerEnd, child: value)),
-    ]));
-
-  Widget _txt(String t, {Color c = kOn, double fs = 13.5,
-      FontWeight w = FontWeight.w600}) =>
-    Text(t, textAlign: TextAlign.end,
-      style: TextStyle(color: c, fontSize: fs, fontWeight: w,
-        fontFamily: urduFont));
-
   @override
   Widget build(BuildContext context) {
     final vedic = useVedic.value;
+    final accent = elementColor(widget.sign.element);
     final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
-    final sk = widget.sign.key;
-    final sg = sys?['signs']?[sk] as Map<String, dynamic>?;
+    final sg = sys?['signs']?[widget.sign.key] as Map<String, dynamic>?;
     final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
     final tabs = (sys?['tabs'] ?? {}) as Map<String, dynamic>;
 
@@ -1128,83 +1232,15 @@ class _SignProfileSectionState extends State<SignProfileSection> {
           child: CircularProgressIndicator(strokeWidth: 3, color: kPrimary)))));
     }
 
-    final order = (sys!['order'] as List).cast<String>();
-    final traits = lx(sg['traits']).split('·')
-      .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
     final details = (sg['details'] ?? {}) as Map<String, dynamic>;
     const tabOrder = ['general', 'career', 'love', 'health',
       'gems', 'dark', 'family', 'karma'];
 
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      // trait chips
-      if (traits.isNotEmpty) ...[
-        Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
-          children: traits.map((t) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(color: kCard,
-              borderRadius: BorderRadius.circular(99),
-              border: Border.all(color: kBorder)),
-            child: Text(t, style: TextStyle(color: kGold,
-              fontSize: 12.5, fontWeight: FontWeight.w700,
-              fontFamily: urduFont)))).toList()),
-        const SizedBox(height: 14),
-      ],
-      // details table — same rows as the website / full profile
-      card(child: Column(children: [
-        _row(lx(rows['dates']), _txt(lx(sg['dates']))),
-        _row(lx(rows['element']), _txt(lx(sys['el']?[sg['el']]))),
-        _row(lx(rows['quality']), _txt(lx(sys['qu']?[sg['qu']]))),
-        _row(lx(rows['ruler']), _txt(((sg['ruler'] ?? []) as List)
-          .map((r) => lx(sys['pl']?[r])).join(' · '))),
-        _row(lx(rows['day']), _txt(lx(sys['day']?[sg['day']]))),
-        _row(lx(rows['numbers']), Wrap(spacing: 6,
-          alignment: WrapAlignment.end,
-          children: ((sg['nums'] ?? []) as List).map((n) => Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(color: kBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: kBorder)),
-            child: Text('$n', style: const TextStyle(color: kOn,
-              fontSize: 13, fontWeight: FontWeight.w700)))).toList())),
-        _row(lx(rows['colors']), Wrap(spacing: 10, runSpacing: 4,
-          alignment: WrapAlignment.end,
-          children: ((sg['colors'] ?? []) as List).map((ck) {
-            final cm = sys['col']?[ck] as Map<String, dynamic>?;
-            final hex = (cm?['h'] ?? '#888888') as String;
-            final col = Color(int.parse(
-              'ff${hex.replaceFirst('#', '')}', radix: 16));
-            return Row(mainAxisSize: MainAxisSize.min, children: [
-              Container(width: 12, height: 12,
-                decoration: BoxDecoration(color: col, shape: BoxShape.circle)),
-              const SizedBox(width: 5),
-              Text(lx(cm), style: TextStyle(color: kOn,
-                fontSize: 13, fontWeight: FontWeight.w600,
-                fontFamily: urduFont)),
-            ]);
-          }).toList())),
-        _row(lx(rows['compat']), Wrap(spacing: 6, runSpacing: 6,
-          alignment: WrapAlignment.end,
-          children: ((sg['compat'] ?? []) as List).map((mk) {
-            final mi = order.indexOf(mk as String);
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-              decoration: BoxDecoration(color: kBg,
-                borderRadius: BorderRadius.circular(99),
-                border: Border.all(color: kBorder)),
-              child: Row(mainAxisSize: MainAxisSize.min, children: [
-                if (mi >= 0) ...[
-                  SignIcon(mi, size: 16),
-                  const SizedBox(width: 5),
-                ],
-                Text(lx(sys['sname']?[mk]),
-                  style: TextStyle(color: kOn, fontSize: 12.5,
-                    fontWeight: FontWeight.w700, fontFamily: urduFont)),
-              ]));
-          }).toList())),
-      ])),
-      // Personality — collapsible dropdown
+      // Personality — collapsible dropdown, heading in the element accent
       DropSection(
         title: lx(rows['personality']).toUpperCase(),
+        titleColor: accent,
         child: Text(lx(sg['pers']),
           style: TextStyle(color: Colors.white, fontSize: 15,
             height: 1.9, fontFamily: urduFont))),
@@ -1215,6 +1251,267 @@ class _SignProfileSectionState extends State<SignProfileSection> {
           style: TextStyle(color: Colors.white, fontSize: 15,
             height: 1.95, fontFamily: urduFont)))),
     ]);
+  }
+}
+
+// ===========================================================================
+// Build 7: Date Calculator (leap-year aware) — ported 1:1 from the website's
+// Zodiac / Rashi date calculator. Opened by the ⓘ next to the dates.
+// ===========================================================================
+const List<String> _lcMonths = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const List<Map<String, dynamic>> _lcWestern = [
+  {'sym': '♈', 'name': {'en': 'Aries', 'ur': 'حمل', 'hi': 'मेष', 'ar': 'الحمل'}, 'm': 3, 'd': 20},
+  {'sym': '♉', 'name': {'en': 'Taurus', 'ur': 'ثور', 'hi': 'वृषभ', 'ar': 'الثور'}, 'm': 4, 'd': 20},
+  {'sym': '♊', 'name': {'en': 'Gemini', 'ur': 'جوزا', 'hi': 'मिथुन', 'ar': 'الجوزاء'}, 'm': 5, 'd': 21},
+  {'sym': '♋', 'name': {'en': 'Cancer', 'ur': 'سرطان', 'hi': 'कर्क', 'ar': 'السرطان'}, 'm': 6, 'd': 21},
+  {'sym': '♌', 'name': {'en': 'Leo', 'ur': 'اسد', 'hi': 'सिंह', 'ar': 'الأسد'}, 'm': 7, 'd': 23},
+  {'sym': '♍', 'name': {'en': 'Virgo', 'ur': 'سنبلہ', 'hi': 'कन्या', 'ar': 'العذراء'}, 'm': 8, 'd': 23},
+  {'sym': '♎', 'name': {'en': 'Libra', 'ur': 'میزان', 'hi': 'तुला', 'ar': 'الميزان'}, 'm': 9, 'd': 23},
+  {'sym': '♏', 'name': {'en': 'Scorpio', 'ur': 'عقرب', 'hi': 'वृश्चिक', 'ar': 'العقرب'}, 'm': 10, 'd': 23},
+  {'sym': '♐', 'name': {'en': 'Sagittarius', 'ur': 'قوس', 'hi': 'धनु', 'ar': 'القوس'}, 'm': 11, 'd': 22},
+  {'sym': '♑', 'name': {'en': 'Capricorn', 'ur': 'جدی', 'hi': 'मकर', 'ar': 'الجدي'}, 'm': 12, 'd': 22},
+  {'sym': '♒', 'name': {'en': 'Aquarius', 'ur': 'دلو', 'hi': 'कुम्भ', 'ar': 'الدلو'}, 'm': 1, 'd': 20},
+  {'sym': '♓', 'name': {'en': 'Pisces', 'ur': 'حوت', 'hi': 'मीन', 'ar': 'الحوت'}, 'm': 2, 'd': 19},
+];
+
+const List<Map<String, dynamic>> _lcVedic = [
+  {'sym': '♈', 'name': {'en': 'Mesha (Aries)', 'ur': 'میش', 'hi': 'मेष', 'ar': 'ميشا'}, 'm': 4, 'd': 13},
+  {'sym': '♉', 'name': {'en': 'Vrishabha (Taurus)', 'ur': 'ورشبھ', 'hi': 'वृषभ', 'ar': 'فريشابها'}, 'm': 5, 'd': 14},
+  {'sym': '♊', 'name': {'en': 'Mithuna (Gemini)', 'ur': 'متھن', 'hi': 'मिथुन', 'ar': 'ميثونا'}, 'm': 6, 'd': 15},
+  {'sym': '♋', 'name': {'en': 'Karka (Cancer)', 'ur': 'کرک', 'hi': 'कर्क', 'ar': 'كاركا'}, 'm': 7, 'd': 16},
+  {'sym': '♌', 'name': {'en': 'Simha (Leo)', 'ur': 'سنہ', 'hi': 'सिंह', 'ar': 'سيمها'}, 'm': 8, 'd': 17},
+  {'sym': '♍', 'name': {'en': 'Kanya (Virgo)', 'ur': 'کنیا', 'hi': 'कन्या', 'ar': 'كانيا'}, 'm': 9, 'd': 17},
+  {'sym': '♎', 'name': {'en': 'Tula (Libra)', 'ur': 'تلا', 'hi': 'तुला', 'ar': 'تولا'}, 'm': 10, 'd': 17},
+  {'sym': '♏', 'name': {'en': 'Vrischika (Scorpio)', 'ur': 'ورشچک', 'hi': 'वृश्चिक', 'ar': 'فريشتشيكا'}, 'm': 11, 'd': 16},
+  {'sym': '♐', 'name': {'en': 'Dhanu (Sagittarius)', 'ur': 'دھنو', 'hi': 'धनु', 'ar': 'دانو'}, 'm': 12, 'd': 16},
+  {'sym': '♑', 'name': {'en': 'Makara (Capricorn)', 'ur': 'مکر', 'hi': 'मकर', 'ar': 'ماكارا'}, 'm': 1, 'd': 14},
+  {'sym': '♒', 'name': {'en': 'Kumbha (Aquarius)', 'ur': 'کمبھ', 'hi': 'कुम्भ', 'ar': 'كومبها'}, 'm': 2, 'd': 13},
+  {'sym': '♓', 'name': {'en': 'Meena (Pisces)', 'ur': 'مین', 'hi': 'मीन', 'ar': 'مينا'}, 'm': 3, 'd': 14},
+];
+
+const Map<String, Map<String, String>> _lcT = {
+  'wTitle': {'en': 'Zodiac Date Calculator', 'ur': 'برج تاریخ کیلکولیٹر', 'hi': 'राशि तिथि कैलकुलेटर', 'ar': 'حاسبة تواريخ الأبراج'},
+  'vTitle': {'en': 'Rashi Date Calculator', 'ur': 'راشی تاریخ کیلکولیٹر', 'hi': 'राशि तिथि कैलकुलेटर', 'ar': 'حاسبة تواريخ الراشي'},
+  'wIntro': {'en': 'Enter any year to see the Western (Tropical) sign dates and whether that year is leap or common.', 'ur': 'کوئی بھی سال درج کریں اور مغربی (Tropical) برجوں کی تاریخیں دیکھیں، ساتھ ہی یہ کہ وہ سال لیپ تھا یا عام۔', 'hi': 'कोई भी वर्ष दर्ज करें और पश्चिमी (सायन) राशि तिथियाँ देखें, साथ ही वह वर्ष लीप था या सामान्य।', 'ar': 'أدخل أيّ سنة لرؤية تواريخ الأبراج الغربية (المداريّة) وما إذا كانت السنة كبيسة أو عاديّة.'},
+  'vIntro': {'en': 'Enter any year to see the Vedic (Sidereal / Lahiri) rashi dates and whether that year is leap or common.', 'ur': 'کوئی بھی سال درج کریں اور وید (Sidereal / لاہڑی) راشیوں کی تاریخیں دیکھیں، ساتھ ہی یہ کہ وہ سال لیپ تھا یا عام۔', 'hi': 'कोई भी वर्ष दर्ज करें और वैदिक (निरयन / लाहिड़ी) राशि तिथियाँ देखें, साथ ही वह वर्ष लीप था या सामान्य।', 'ar': 'أدخل أيّ سنة لرؤية تواريخ الراشي الفيدية (الفلكية / لاهيري) وما إذا كانت السنة كبيسة أو عاديّة.'},
+  'yearLbl': {'en': 'Enter Year:', 'ur': 'سال درج کریں:', 'hi': 'वर्ष दर्ज करें:', 'ar': 'أدخل السنة:'},
+  'calc': {'en': 'Calculate', 'ur': 'حساب لگائیں', 'hi': 'गणना करें', 'ar': 'احسب'},
+  'leap': {'en': 'Leap Year — 366 days', 'ur': 'لیپ سال — ۳۶۶ دن', 'hi': 'लीप वर्ष — 366 दिन', 'ar': 'سنة كبيسة — ٣٦٦ يومًا'},
+  'common': {'en': 'Common Year — 365 days', 'ur': 'عام سال — ۳۶۵ دن', 'hi': 'सामान्य वर्ष — 365 दिन', 'ar': 'سنة عاديّة — ٣٦٥ يومًا'},
+  'thSign': {'en': 'Sign', 'ur': 'برج', 'hi': 'राशि', 'ar': 'البرج'},
+  'thRashi': {'en': 'Rashi / Sign', 'ur': 'راشی / برج', 'hi': 'राशि', 'ar': 'الراشي / البرج'},
+  'thStart': {'en': 'Start Date', 'ur': 'آغاز', 'hi': 'आरंभ तिथि', 'ar': 'تاريخ البدء'},
+  'thEnd': {'en': 'End Date', 'ur': 'اختتام', 'hi': 'अंत तिथि', 'ar': 'تاريخ الانتهاء'},
+  'exHead': {'en': 'Why do these dates shift?', 'ur': 'یہ تاریخیں کیوں بدلتی ہیں؟', 'hi': 'ये तिथियाँ क्यों बदलती हैं?', 'ar': 'لماذا تتغيّر هذه التواريخ؟'},
+  'wExp': {'en': "Western (tropical) dates follow the Sun and the seasons — Aries always begins at the spring equinox. A solar year is about 365.2422 days, but the calendar uses 365, so the equinox drifts ~6 hours each year. The leap day every 4 years resets this, which is why a sign's start date bounces between, for example, March 19, 20 and 21.", 'ur': "مغربی (Tropical) تاریخیں سورج اور موسموں کے ساتھ چلتی ہیں — برجِ حمل ہمیشہ بہار کے اعتدال (Equinox) پر شروع ہوتا ہے۔ شمسی سال تقریباً ۳۶۵.۲۴۲۲ دن کا ہے مگر کیلنڈر ۳۶۵ دن کا، اِس لیے ہر سال تقریباً ۶ گھنٹے کا فرق آ جاتا ہے۔ ہر ۴ سال بعد لیپ کا دن اِسے درست کر دیتا ہے، اِسی لیے کسی برج کی ابتدائی تاریخ مثلاً ۱۹، ۲۰ اور ۲۱ مارچ کے درمیان بدلتی رہتی ہے۔", 'hi': "पश्चिमी (सायन) तिथियाँ सूर्य और ऋतुओं का अनुसरण करती हैं — मेष सदा वसंत विषुव (Equinox) पर आरंभ होता है। सौर वर्ष लगभग 365.2422 दिन का है, पर कैलेंडर 365 दिन का, इसलिए हर वर्ष लगभग 6 घंटे का अंतर आता है। हर 4 वर्ष में लीप दिवस इसे संतुलित कर देता है, इसीलिए किसी राशि की आरंभ तिथि उदाहरणतः 19, 20 और 21 मार्च के बीच बदलती रहती है।", 'ar': "تتبع التواريخ الغربية (المداريّة) الشمس والفصول — يبدأ الحمل دائمًا عند الاعتدال الربيعيّ. السنة الشمسيّة نحو ٣٦٥.٢٤٢٢ يومًا لكنّ التقويم يعتمد ٣٦٥، فينزاح الاعتدال ~٦ ساعات سنويًّا. واليوم الكبيس كلّ ٤ سنوات يصحّح ذلك، ولهذا يتنقّل تاريخ بدء البرج بين ١٩ و٢٠ و٢١ مارس مثلًا."},
+  'vExp': {'en': "Vedic (sidereal) dates are measured against the fixed stars. Because Earth slowly wobbles on its axis — the precession of the equinoxes — the alignment drifts about 50.3 arcseconds a year, roughly one full day every 72 years. This steady shift (the ayanamsa) is why the rashi dates move gradually forward across the decades. Leap days still nudge each individual year by a day.", 'ur': "وید (Sidereal) تاریخیں ثابت ستاروں کے مقابلے میں ناپی جاتی ہیں۔ زمین اپنے محور پر آہستہ لرزتی ہے — Precession of Equinoxes — جس سے ہر سال زاویہ تقریباً ۵۰.۳ آرک سیکنڈ بدلتا ہے، یعنی ہر ۷۲ سال میں تقریباً ۱ پورا دن۔ یہی مستقل فرق (ایانامسا) دہائیوں میں راشی تاریخوں کو آہستہ آگے لے جاتا ہے۔ لیپ کے دن ہر سال کو ایک دن آگے پیچھے بھی کرتے ہیں۔", 'hi': "वैदिक (निरयन) तिथियाँ स्थिर तारों के सापेक्ष मापी जाती हैं। पृथ्वी अपने अक्ष पर धीरे डगमगाती है — विषुवों का अयन (Precession) — जिससे संरेखण प्रति वर्ष लगभग 50.3 आर्कसेकंड खिसकता है, यानी हर 72 वर्ष में लगभग 1 पूरा दिन। यही निरंतर बदलाव (अयनांश) दशकों में राशि तिथियों को धीरे आगे ले जाता है। लीप दिवस प्रत्येक वर्ष को एक दिन और भी खिसकाते हैं।", 'ar': "تُقاس التواريخ الفيدية (الفلكية) بالنسبة إلى النجوم الثابتة. ولأنّ الأرض تترنّح ببطء حول محورها — مبادرة الاعتدالين — ينزاح المحاذاة نحو ٥٠.٣ ثانية قوسيّة سنويًّا، أي يومًا كاملًا كلّ ٧٢ سنة تقريبًا. هذا الانزياح الثابت (الأيانامسا) هو سبب تقدّم تواريخ الراشي تدريجيًّا عبر العقود. وما تزال الأيام الكبيسة تزحزح كلّ سنة بيوم."},
+};
+
+class DateCalculatorScreen extends StatefulWidget {
+  final bool vedic;
+  const DateCalculatorScreen({super.key, required this.vedic});
+  @override
+  State<DateCalculatorScreen> createState() => _DateCalculatorScreenState();
+}
+
+class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
+  late final TextEditingController _yc;
+  late int _year;
+
+  @override
+  void initState() {
+    super.initState();
+    _year = DateTime.now().year;
+    _yc = TextEditingController(text: '$_year');
+  }
+
+  @override
+  void dispose() { _yc.dispose(); super.dispose(); }
+
+  bool _isLeap(int y) => (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+
+  int _westShift(int year) {
+    int cycle = (year - 2000) % 4; if (cycle < 0) cycle += 4;
+    int shift = 0;
+    if (cycle == 0) { shift = -1; } else if (cycle == 3) { shift = 1; }
+    shift += ((year - 2000) / 100).floor() - ((year - 2000) / 400).floor();
+    return shift;
+  }
+
+  int _vedShift(int year) => ((year - 2000) / 72).floor();
+
+  String _fmt(int m, int d) {
+    const back = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    const fwd  = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    while (d < 1) { m--; if (m < 1) m = 12; d += back[m - 1]; }
+    int dim = fwd[m - 1];
+    while (d > dim) { d -= dim; m++; if (m > 12) m = 1; dim = fwd[m - 1]; }
+    return '${_lcMonths[m - 1]} $d';
+  }
+
+  void _calc() {
+    final v = int.tryParse(_yc.text.trim());
+    if (v == null) return;
+    final y = v < 1 ? 1 : (v > 3000 ? 3000 : v);
+    setState(() => _year = y);
+    FocusScope.of(context).unfocus();
+  }
+
+  String _stripB(String s) => s.replaceAll('<b>', '').replaceAll('</b>', '');
+
+  Widget _cell(Widget child, {int flex = 1, Alignment? align}) => Expanded(
+    flex: flex, child: Align(
+      alignment: align ??
+        (rtl ? Alignment.centerRight : Alignment.centerLeft), child: child));
+
+  @override
+  Widget build(BuildContext context) {
+    final ved = widget.vedic;
+    final lang = currentLang.value.name;
+    String t(String k) => _lcT[k]?[lang] ?? _lcT[k]?['en'] ?? '';
+    final signs = ved ? _lcVedic : _lcWestern;
+    final leap = _isLeap(_year);
+
+    // header row
+    final tableRows = <Widget>[
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: const BoxDecoration(color: kCard),
+        child: Row(children: [
+          _cell(Text(ved ? t('thRashi') : t('thSign'),
+            style: TextStyle(color: kLight, fontSize: 12.5,
+              fontWeight: FontWeight.w700, fontFamily: urduFont)), flex: 5),
+          _cell(Text(t('thStart'),
+            style: TextStyle(color: kLight, fontSize: 12.5,
+              fontWeight: FontWeight.w700, fontFamily: urduFont)), flex: 4),
+          _cell(Text(t('thEnd'),
+            style: TextStyle(color: kLight, fontSize: 12.5,
+              fontWeight: FontWeight.w700, fontFamily: urduFont)), flex: 4),
+        ])),
+    ];
+    for (int i = 0; i < signs.length; i++) {
+      final s = signs[i];
+      final ns = signs[(i + 1) % signs.length];
+      final sm = s['m'] as int, sd = s['d'] as int;
+      final nm = ns['m'] as int, nd = ns['d'] as int;
+      final sh = ved ? _vedShift(_year) : _westShift(_year);
+      final startStr = _fmt(sm, sd + sh);
+      final endStr = _fmt(nm, nd + sh - 1);
+      final endYear = (sm >= nm) ? _year + 1 : _year;
+      final nameMap = s['name'] as Map<String, dynamic>;
+      final nm2 = (nameMap[lang] ?? nameMap['en']).toString();
+      tableRows.add(Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: i.isEven ? kBg : Colors.transparent,
+          border: const Border(top: BorderSide(color: kBorder, width: 0.6))),
+        child: Row(children: [
+          _cell(Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(s['sym'] as String,
+              style: const TextStyle(color: kGold, fontSize: 15)),
+            const SizedBox(width: 7),
+            Flexible(child: Text(nm2,
+              style: TextStyle(color: kOn, fontSize: 13,
+                fontWeight: FontWeight.w700, fontFamily: urduFont))),
+          ]), flex: 5),
+          _cell(Text('$startStr, $_year',
+            style: const TextStyle(color: kMuted, fontSize: 12.5)), flex: 4),
+          _cell(Text('$endStr, $endYear',
+            style: const TextStyle(color: kMuted, fontSize: 12.5)), flex: 4),
+        ])));
+    }
+
+    return Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(ved ? t('vTitle') : t('wTitle'),
+            style: TextStyle(color: kGold, fontSize: 18,
+              fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: Center(child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(18, 12, 18,
+              28 + MediaQuery.of(context).viewPadding.bottom),
+            children: [
+              Text(ved ? t('vIntro') : t('wIntro'),
+                style: TextStyle(color: kMuted, fontSize: 13.5, height: 1.7,
+                  fontFamily: urduFont)),
+              const SizedBox(height: 16),
+              Row(children: [
+                Text(t('yearLbl'),
+                  style: TextStyle(color: kOn, fontSize: 14,
+                    fontWeight: FontWeight.w600, fontFamily: urduFont)),
+                const SizedBox(width: 10),
+                SizedBox(width: 100, child: TextField(
+                  controller: _yc,
+                  keyboardType: TextInputType.number,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: kOn, fontSize: 15,
+                    fontWeight: FontWeight.w700),
+                  decoration: InputDecoration(
+                    isDense: true, filled: true, fillColor: kCard,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 11),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: kBorder)),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: kPrimary))),
+                  onSubmitted: (_) => _calc())),
+                const SizedBox(width: 10),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: kPrimary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18, vertical: 13)),
+                  onPressed: _calc,
+                  child: Text(t('calc'),
+                    style: TextStyle(fontWeight: FontWeight.w700,
+                      fontFamily: urduFont))),
+              ]),
+              const SizedBox(height: 16),
+              // leap / common badge
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: Color.alphaBlend(
+                      (leap ? elementColor('earth') : kGold).withOpacity(0.16),
+                      kCard),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color:
+                      (leap ? elementColor('earth') : kGold).withOpacity(0.5))),
+                  child: Text('$_year — ${leap ? t('leap') : t('common')}',
+                    style: TextStyle(
+                      color: leap ? elementColor('earth') : kGold,
+                      fontSize: 13, fontWeight: FontWeight.w700,
+                      fontFamily: urduFont)))),
+              const SizedBox(height: 16),
+              // dates table
+              ClipRRect(borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: kBorder)),
+                  child: Column(children: tableRows))),
+              const SizedBox(height: 20),
+              // explanation
+              Text(t('exHead'),
+                style: TextStyle(color: kLight, fontSize: 15,
+                  fontWeight: FontWeight.w800, fontFamily: urduFont)),
+              const SizedBox(height: 8),
+              Text(_stripB(ved ? t('vExp') : t('wExp')),
+                style: TextStyle(color: kOn, fontSize: 13.5, height: 1.85,
+                  fontFamily: urduFont)),
+            ])))));
   }
 }
 
