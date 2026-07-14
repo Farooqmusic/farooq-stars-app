@@ -732,7 +732,9 @@ class _SignHeaderCardState extends State<SignHeaderCard> {
     ];
 
     if (sg != null) {
-      final order = ((sys?['order'] ?? const <dynamic>[]) as List)
+      // sg != null guarantees sys != null (sg came from sys?['signs']).
+      // Using sys! here also promotes sys to non-null for the rows below.
+      final order = ((sys!['order'] ?? const <dynamic>[]) as List)
         .cast<String>();
       final traits = lx(sg['traits']).split('·')
         .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
