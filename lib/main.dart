@@ -1085,22 +1085,41 @@ class _WheelPainter extends CustomPainter {
   @override
   void paint(Canvas cv, Size size) {
     final c = size.width / 2;
-    final rOut = size.width / 2 - 6, rIn = rOut - 26;
+    final rOut = size.width / 2 - 20, rIn = rOut - 24;
+    final rHouse = rIn - 22;
     final ring = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
       ..color = const Color(0xFF4a3866);
     cv.drawCircle(Offset(c, c), rOut, ring);
     cv.drawCircle(Offset(c, c), rIn, ring);
+    cv.drawCircle(Offset(c, c), rHouse,
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 1
+        ..color = const Color(0x33c77dff));
     for (int i = 0; i < 12; i++) {
       final bl = i * 30.0;
       cv.drawLine(_pos(bl, rIn, c), _pos(bl, rOut, c),
         Paint()..color = const Color(0xFF4a3866)..strokeWidth = 1);
       _label(cv, _signAbbr[i], _pos(i * 30.0 + 15, (rIn + rOut) / 2, c),
         elementColor(signs[i].element), 11.5, FontWeight.w700);
+      // whole-sign house number (house 1 = Ascendant's sign)
+      final hn = ((i - chart.ascSign) % 12 + 12) % 12 + 1;
+      _label(cv, '$hn', _pos(i * 30.0 + 15, rHouse - 11, c),
+        kMuted, 9.5, FontWeight.w700);
     }
-    // Ascendant marker at the left horizon
-    cv.drawLine(_pos(chart.asc, rIn - 6, c), _pos(chart.asc, rOut + 2, c),
-      Paint()..color = kGold..strokeWidth = 2.6);
-    _label(cv, 'ASC', _pos(chart.asc, rIn - 18, c), kGold, 10, FontWeight.w800);
+    // Axis cross — horizon (ASC–DESC) and meridian (MC–IC)
+    final desc = _norm(chart.asc + 180), ic = _norm(chart.mc + 180);
+    cv.drawLine(_pos(chart.asc, rIn, c), _pos(desc, rIn, c),
+      Paint()..color = kGold.withOpacity(0.45)..strokeWidth = 1.4);
+    cv.drawLine(_pos(chart.mc, rIn, c), _pos(ic, rIn, c),
+      Paint()..color = kLight.withOpacity(0.45)..strokeWidth = 1.4);
+    void axisMark(double lon, String s, Color col) {
+      cv.drawLine(_pos(lon, rIn - 3, c), _pos(lon, rOut + 2, c),
+        Paint()..color = col..strokeWidth = 2.4);
+      _label(cv, s, _pos(lon, rOut + 10, c), col, 9, FontWeight.w800);
+    }
+    axisMark(chart.asc, 'ASC', kGold);
+    axisMark(desc, 'DESC', kGold.withOpacity(0.75));
+    axisMark(chart.mc, 'MC', kLight);
+    axisMark(ic, 'IC', kLight.withOpacity(0.75));
     cv.drawCircle(Offset(c, c), 2.5, Paint()..color = kGold);
   }
 
@@ -1147,8 +1166,8 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
 
   Widget _wheel(LiveChart chart) => LayoutBuilder(builder: (_, box) {
     final sz = math.min(box.maxWidth, 360.0);
-    final c = sz / 2, rP = sz / 2 - 50;
-    final radii = [rP, rP - 22, rP - 44];
+    final c = sz / 2, rP = sz / 2 - 74;
+    final radii = [rP, rP - 20, rP - 40];
     final sorted = [...chart.bodies]..sort((a, b) => a.lon.compareTo(b.lon));
     final placed = <_Placed>[];
     double prev = -999; int ri = 0;
