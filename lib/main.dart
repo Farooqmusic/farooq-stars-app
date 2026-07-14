@@ -877,12 +877,65 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
     }
   }
 
+  // Build 10: share the CURRENT reading (daily/weekly/monthly/yearly) straight
+  // to WhatsApp — sign name, its qualities, the reading, and our web + app
+  // links. Works the same in Western and Vedic, for every sign.
+  Future<void> _shareWhatsApp() async {
+    final sign = widget.sign;
+    final vedic = useVedic.value;
+    final lang = currentLang.value;
+
+    // qualities/traits from the profiles json (already cached after first load)
+    String qualities = '';
+    final all = await loadProfiles();
+    final sys = all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
+    final sg = sys?['signs']?[sign.key] as Map<String, dynamic>?;
+    if (sg != null) {
+      final tf = sg['traits'];
+      final ts = (tf is Map ? (tf[lang.name] ?? tf['en'] ?? '') : (tf ?? ''))
+        .toString();
+      qualities = ts.split('·').map((e) => e.trim())
+        .where((e) => e.isNotEmpty).join(' · ');
+    }
+
+    final name = vedic
+      ? '${sign.vname[lang] ?? sign.vname[AppLang.en]!}'
+        ' (${sign.name[lang] ?? sign.name[AppLang.en]!})'
+      : (sign.name[lang] ?? sign.name[AppLang.en]!);
+    final dates = vedic ? sign.vedicDates : sign.westDates;
+    final web = vedic
+      ? '$kWebsite/farooq-now-vedic.html'
+      : '$kWebsite/farooq-now-western.html';
+
+    final buf = StringBuffer()
+      ..writeln('✨ Farooq Stars ✨')
+      ..writeln('$name  •  $dates');
+    if (qualities.isNotEmpty) buf.writeln(qualities);
+    buf
+      ..writeln('')
+      ..writeln('🔮 ${tr('p_$_period')} — ${tr('dailyReading')}')
+      ..writeln(_text ?? '')
+      ..writeln('')
+      ..writeln('🌐 $web')
+      ..writeln('📲 Farooq Stars: $kWebsite');
+
+    // wa.me opens WhatsApp directly (app if installed, else web WhatsApp).
+    await openUrl(
+      'https://wa.me/?text=${Uri.encodeComponent(buf.toString())}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final vedic = useVedic.value;
     final url = vedic
       ? '$kWebsite/farooq-now-vedic.html'
       : '$kWebsite/farooq-now-western.html';
+    final shareLabel = {
+      AppLang.en: 'Share on WhatsApp',
+      AppLang.ur: 'واٹس ایپ پر شیئر کریں',
+      AppLang.hi: 'WhatsApp पर शेयर करें',
+      AppLang.ar: 'مشاركة على واتساب',
+    }[currentLang.value] ?? 'Share on WhatsApp';
     return card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(children: [
@@ -947,6 +1000,19 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
           label: Text(tr('readOnWebsite'),
             style: TextStyle(fontWeight: FontWeight.w700,
               fontFamily: urduFont))),
+        // Share the current reading on WhatsApp — only once it has loaded.
+        if (!_loading && !_error && _text != null) ...[
+          const SizedBox(height: 8),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF25D366),
+              padding: const EdgeInsets.symmetric(vertical: 12)),
+            onPressed: _shareWhatsApp,
+            icon: const Icon(Icons.chat, size: 18, color: Colors.white),
+            label: Text(shareLabel,
+              style: TextStyle(fontWeight: FontWeight.w700,
+                color: Colors.white, fontFamily: urduFont))),
+        ],
       ]));
   }
 }
