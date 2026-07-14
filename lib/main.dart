@@ -376,8 +376,10 @@ class SignArt extends StatelessWidget {
           placeholder: (_, __) => cardArt,
           errorWidget: (_, __, ___) => cardArt)
       : cardArt;
+    // hero (Today banner) uses the artwork's real 11:6 shape so there are no
+    // empty bands top/bottom; the small square card art stays 1:1.
     return ClipRRect(borderRadius: BorderRadius.circular(18),
-      child: AspectRatio(aspectRatio: 1, child: img));
+      child: AspectRatio(aspectRatio: hero ? (11 / 6) : 1, child: img));
   }
 }
 
@@ -602,6 +604,11 @@ class TodayTab extends StatelessWidget {
             DailyReadingCard(
               key: ValueKey('read-${sign.key}-${currentLang.value.name}'),
               sign: sign),
+            // Build 6: full sign profile inline on the Today page — no more
+            // tapping the picture. Details table + Personality + 8 sections,
+            // each collapsible to stay compact.
+            SignProfileSection(
+              key: ValueKey('prof-${sign.key}'), sign: sign),
           ] else
             card(child: Column(children: [
               const Text('✨', style: TextStyle(fontSize: 40)),
@@ -638,11 +645,8 @@ class SignCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final lang = currentLang.value;
     return card(child: Column(children: [
-      GestureDetector(
-        onTap: () => Navigator.push(context, MaterialPageRoute(
-          builder: (_) => ProfileScreen(sign: sign))),
-        child: SignArt(sign, hero: true)),
-      const SizedBox(height: 12),
+      SignArt(sign, hero: true),
+      const SizedBox(height: 10),
       Text(signName(sign),
         style: TextStyle(color: kOn, fontSize: 24,
           fontWeight: FontWeight.w800, fontFamily: urduFont)),
@@ -1004,6 +1008,213 @@ class _ProfileScreenState extends State<ProfileScreen> {
         body: ValueListenableBuilder<AppLang>(
           valueListenable: currentLang,
           builder: (_, __, ___) => body)));
+  }
+}
+
+// ===========================================================================
+// Build 6: collapsible dropdown — used for Personality + the 8 sections so
+// the whole profile fits compactly on the Today page.
+// ===========================================================================
+class DropSection extends StatefulWidget {
+  final String title;
+  final Widget child;
+  final bool open;
+  final Color titleColor;
+  const DropSection({super.key, required this.title, required this.child,
+    this.open = false, this.titleColor = kGold});
+  @override
+  State<DropSection> createState() => _DropSectionState();
+}
+
+class _DropSectionState extends State<DropSection> {
+  late bool _open = widget.open;
+
+  @override
+  Widget build(BuildContext context) => card(
+    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      InkWell(
+        onTap: () => setState(() => _open = !_open),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          child: Row(children: [
+            Expanded(child: Text(widget.title,
+              style: TextStyle(color: widget.titleColor, fontSize: 14,
+                fontWeight: FontWeight.w800, letterSpacing: 0.5,
+                fontFamily: urduFont))),
+            AnimatedRotation(
+              turns: _open ? 0.5 : 0,
+              duration: const Duration(milliseconds: 180),
+              child: const Icon(Icons.expand_more, color: kMuted, size: 22)),
+          ]))),
+      AnimatedCrossFade(
+        firstChild: const SizedBox(width: double.infinity, height: 0),
+        secondChild: Padding(
+          padding: const EdgeInsets.only(bottom: 14),
+          child: widget.child),
+        crossFadeState:
+          _open ? CrossFadeState.showSecond : CrossFadeState.showFirst,
+        duration: const Duration(milliseconds: 180)),
+    ]));
+}
+
+// ===========================================================================
+// Build 6: FULL SIGN PROFILE, inline on the Today page. Same content as the
+// ProfileScreen (details table + personality + 8 sections, all 4 languages),
+// but Personality and the 8 sections are collapsible dropdowns. The banner,
+// name, dates, chips and tagline already sit above (in SignCard), so this
+// starts at the trait chips.
+// ===========================================================================
+class SignProfileSection extends StatefulWidget {
+  final ZSign sign;
+  const SignProfileSection({super.key, required this.sign});
+  @override
+  State<SignProfileSection> createState() => _SignProfileSectionState();
+}
+
+class _SignProfileSectionState extends State<SignProfileSection> {
+  Map<String, dynamic>? _all;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    loadProfiles().then((d) {
+      if (mounted) setState(() { _all = d; _failed = d == null; });
+    });
+  }
+
+  String lx(dynamic m) {
+    if (m is Map) {
+      return (m[currentLang.value.name] ?? m['en'] ?? '').toString();
+    }
+    return m == null ? '' : m.toString();
+  }
+
+  Widget _row(String label, Widget value) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Expanded(flex: 2, child: Text(label,
+        style: TextStyle(color: kMuted, fontSize: 13.5,
+          fontFamily: urduFont))),
+      Expanded(flex: 3, child: Align(
+        alignment: AlignmentDirectional.centerEnd, child: value)),
+    ]));
+
+  Widget _txt(String t, {Color c = kOn, double fs = 13.5,
+      FontWeight w = FontWeight.w600}) =>
+    Text(t, textAlign: TextAlign.end,
+      style: TextStyle(color: c, fontSize: fs, fontWeight: w,
+        fontFamily: urduFont));
+
+  @override
+  Widget build(BuildContext context) {
+    final vedic = useVedic.value;
+    final sys = _all?[vedic ? 'vedic' : 'western'] as Map<String, dynamic>?;
+    final sk = widget.sign.key;
+    final sg = sys?['signs']?[sk] as Map<String, dynamic>?;
+    final rows = (sys?['rows'] ?? {}) as Map<String, dynamic>;
+    final tabs = (sys?['tabs'] ?? {}) as Map<String, dynamic>;
+
+    if (_failed) {
+      return card(child: Text(tr('readingError'), textAlign: TextAlign.center,
+        style: TextStyle(color: kMuted, fontSize: 14, height: 1.8,
+          fontFamily: urduFont)));
+    }
+    if (sg == null) {
+      return card(child: const Center(child: Padding(
+        padding: EdgeInsets.symmetric(vertical: 22),
+        child: SizedBox(width: 28, height: 28,
+          child: CircularProgressIndicator(strokeWidth: 3, color: kPrimary)))));
+    }
+
+    final order = (sys!['order'] as List).cast<String>();
+    final traits = lx(sg['traits']).split('·')
+      .map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    final details = (sg['details'] ?? {}) as Map<String, dynamic>;
+    const tabOrder = ['general', 'career', 'love', 'health',
+      'gems', 'dark', 'family', 'karma'];
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // trait chips
+      if (traits.isNotEmpty) ...[
+        Wrap(spacing: 8, runSpacing: 8, alignment: WrapAlignment.center,
+          children: traits.map((t) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(color: kCard,
+              borderRadius: BorderRadius.circular(99),
+              border: Border.all(color: kBorder)),
+            child: Text(t, style: TextStyle(color: kGold,
+              fontSize: 12.5, fontWeight: FontWeight.w700,
+              fontFamily: urduFont)))).toList()),
+        const SizedBox(height: 14),
+      ],
+      // details table — same rows as the website / full profile
+      card(child: Column(children: [
+        _row(lx(rows['dates']), _txt(lx(sg['dates']))),
+        _row(lx(rows['element']), _txt(lx(sys['el']?[sg['el']]))),
+        _row(lx(rows['quality']), _txt(lx(sys['qu']?[sg['qu']]))),
+        _row(lx(rows['ruler']), _txt(((sg['ruler'] ?? []) as List)
+          .map((r) => lx(sys['pl']?[r])).join(' · '))),
+        _row(lx(rows['day']), _txt(lx(sys['day']?[sg['day']]))),
+        _row(lx(rows['numbers']), Wrap(spacing: 6,
+          alignment: WrapAlignment.end,
+          children: ((sg['nums'] ?? []) as List).map((n) => Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: kBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: kBorder)),
+            child: Text('$n', style: const TextStyle(color: kOn,
+              fontSize: 13, fontWeight: FontWeight.w700)))).toList())),
+        _row(lx(rows['colors']), Wrap(spacing: 10, runSpacing: 4,
+          alignment: WrapAlignment.end,
+          children: ((sg['colors'] ?? []) as List).map((ck) {
+            final cm = sys['col']?[ck] as Map<String, dynamic>?;
+            final hex = (cm?['h'] ?? '#888888') as String;
+            final col = Color(int.parse(
+              'ff${hex.replaceFirst('#', '')}', radix: 16));
+            return Row(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 12, height: 12,
+                decoration: BoxDecoration(color: col, shape: BoxShape.circle)),
+              const SizedBox(width: 5),
+              Text(lx(cm), style: TextStyle(color: kOn,
+                fontSize: 13, fontWeight: FontWeight.w600,
+                fontFamily: urduFont)),
+            ]);
+          }).toList())),
+        _row(lx(rows['compat']), Wrap(spacing: 6, runSpacing: 6,
+          alignment: WrapAlignment.end,
+          children: ((sg['compat'] ?? []) as List).map((mk) {
+            final mi = order.indexOf(mk as String);
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(color: kBg,
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(color: kBorder)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                if (mi >= 0) ...[
+                  SignIcon(mi, size: 16),
+                  const SizedBox(width: 5),
+                ],
+                Text(lx(sys['sname']?[mk]),
+                  style: TextStyle(color: kOn, fontSize: 12.5,
+                    fontWeight: FontWeight.w700, fontFamily: urduFont)),
+              ]));
+          }).toList())),
+      ])),
+      // Personality — collapsible dropdown
+      DropSection(
+        title: lx(rows['personality']).toUpperCase(),
+        child: Text(lx(sg['pers']),
+          style: TextStyle(color: Colors.white, fontSize: 15,
+            height: 1.9, fontFamily: urduFont))),
+      // the 8 sections — each its own collapsible dropdown, General first
+      ...tabOrder.map((t) => DropSection(
+        title: lx(tabs[t]),
+        child: Text(lx(details[t]),
+          style: TextStyle(color: Colors.white, fontSize: 15,
+            height: 1.95, fontFamily: urduFont)))),
+    ]);
   }
 }
 
