@@ -1006,8 +1006,10 @@ class _LiveSkyTabState extends State<LiveSkyTab> {
     final phase = s.waxing ? _skyWords['wax']![l]! : _skyWords['wan']![l]!;
     final retroStr = s.retro
       .map((k) => _planetNamesLive[k]?[l] ?? k).join('، ');
-    final url = vedic ? '$kWebsite/farooq-vedic.html'
-      : '$kWebsite/farooq-western.html';
+    // The LIVE SKY pages (current sky: circle chart + Ascendant + houses),
+    // NOT the birth-chart pages.
+    final url = vedic ? '$kWebsite/farooq-now-vedic.html'
+      : '$kWebsite/farooq-now-western.html';
     final title = _skyEyebrow[vedic ? 'ved' : 'west']![l]!;
 
     return GestureDetector(
