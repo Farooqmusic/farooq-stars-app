@@ -609,6 +609,9 @@ const Map<String, List<List<double>>> _elem = {
   'mars': [[1.52371034, 0.09339410, 1.84969142, -4.55343205, -23.94362959, 49.55953891], [0.00001847, 0.00007882, -0.00813131, 19140.30268499, 0.44441088, -0.29257343]],
   'jupiter': [[5.20288700, 0.04838624, 1.30439695, 34.39644051, 14.72847983, 100.47390909], [-0.00011607, -0.00013253, -0.00183714, 3034.74612775, 0.21252668, 0.20469106]],
   'saturn': [[9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448], [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794]],
+  'uranus': [[19.18916464, 0.04725744, 0.77263783, 313.23810451, 170.95427630, 74.01692503], [-0.00196176, -0.00004397, -0.00242939, 428.48202785, 0.40805281, 0.04240589]],
+  'neptune': [[30.06992276, 0.00859048, 1.77004347, -55.12002969, 44.96476227, 131.78422574], [0.00026291, 0.00005105, 0.00035372, 218.45945325, -0.32241464, -0.00508664]],
+  'pluto': [[39.48211675, 0.24882730, 17.14001206, 238.92903833, 224.06891629, 110.30393684], [-0.00031596, 0.00005170, 0.00004818, 145.20780515, -0.04062942, -0.01183482]],
 };
 
 List<double> _helioXY(String name, double t) {
@@ -672,8 +675,35 @@ double _ayanamsa(double jd) {
   final y = 2000.0 + (jd - 2451545.0) / 365.25;
   return 23.85 + (y - 2000) * 0.013969;
 }
-double _lonAt(String name, double t) => name == 'Sun'
-  ? _sunLon(t) : name == 'Moon' ? _moonLon(t) : _planetLon(name, t);
+double _rahuLon(double t) => _norm(125.0445479 - 1934.1362891 * t +
+  0.0020754 * t * t + t * t * t / 467410);
+double _obliquity(double t) => 23.439291 - 0.0130042 * t -
+  0.00000016 * t * t + 0.000000504 * t * t * t;
+// Ascendant + Midheaven for a given instant and observer location.
+List<double> _anglesOf(double jd, double lonE, double lat) {
+  final t = (jd - 2451545.0) / 36525;
+  final gmst = _norm(280.46061837 + 360.98564736629 * (jd - 2451545.0) +
+    0.000387933 * t * t - t * t * t / 38710000);
+  final lst = _norm(gmst + lonE), ramc = lst * _d2r,
+    eps = _obliquity(t) * _d2r, phi = lat * _d2r;
+  double asc = _norm(math.atan2(math.cos(ramc),
+    -(math.sin(ramc) * math.cos(eps) + math.tan(phi) * math.sin(eps))) * _r2d);
+  if (_norm(asc - lst) > 180) asc = _norm(asc + 180);
+  double mc = _norm(math.atan2(math.sin(ramc),
+    math.cos(ramc) * math.cos(eps)) * _r2d);
+  final off = _norm(mc - lst);
+  if (off > 90 && off < 270) mc = _norm(mc + 180);
+  return [asc, mc];
+}
+double _lonAt(String name, double t) {
+  switch (name) {
+    case 'Sun': return _sunLon(t);
+    case 'Moon': return _moonLon(t);
+    case 'Rahu': return _rahuLon(t);
+    case 'Ketu': return _norm(_rahuLon(t) + 180);
+    default: return _planetLon(name.toLowerCase(), t);
+  }
+}
 double _motionOf(String name, double t) {
   final a = _lonAt(name, t), b = _lonAt(name, t + 1 / 36525);
   return ((b - a + 540) % 360) - 180;
@@ -963,6 +993,262 @@ class DailyReadingScreen extends StatelessWidget {
 }
 
 // ===========================================================================
+// Build 15: full NATIVE Live Sky — real planet positions + Ascendant/Lagna
+// drawn as a zodiac wheel and a detail box, Western (tropical) & Vedic
+// (sidereal). Location = timezone city (Doha for the user); GPS comes next.
+// ===========================================================================
+const List<String> _livePlanets = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars',
+  'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Rahu', 'Ketu'];
+const Map<String, String> _livePlanetIcon = {
+  'Sun': 'sun.png', 'Moon': 'moon.png', 'Mercury': 'mercury.png',
+  'Venus': 'venus.png', 'Mars': 'mars.png', 'Jupiter': 'jupiter.png',
+  'Saturn': 'saturn.png', 'Uranus': 'uranus.png', 'Neptune': 'neptune.png',
+  'Pluto': 'pluto.png', 'Rahu': 'rahu.png', 'Ketu': 'ketu.png',
+};
+const Map<String, Color> _livePlanetColor = {
+  'Sun': Color(0xFFf0a93c), 'Moon': Color(0xFF6aa3e0), 'Mercury': Color(0xFF2bc5ad),
+  'Venus': Color(0xFFe85fad), 'Mars': Color(0xFFff6b54), 'Jupiter': Color(0xFFf0aa3c),
+  'Saturn': Color(0xFFd8c084), 'Uranus': Color(0xFF7fd4e0), 'Neptune': Color(0xFF45c0c0),
+  'Pluto': Color(0xFFb576e0), 'Rahu': Color(0xFFa3b3c0), 'Ketu': Color(0xFFcf9a6a),
+};
+const List<String> _signAbbr = ['Ari', 'Tau', 'Gem', 'Cnc', 'Leo', 'Vir',
+  'Lib', 'Sco', 'Sag', 'Cap', 'Aqr', 'Psc'];
+
+String _fmtDeg(double lon) {
+  final x = _norm(lon) % 30;
+  final d = x.floor(), m = ((x - d) * 60).floor();
+  return "$d°${m.toString().padLeft(2, '0')}'";
+}
+
+class LiveBody {
+  final String key;
+  final double lon;
+  final bool retro;
+  final int sign, house;
+  const LiveBody(this.key, this.lon, this.retro, this.sign, this.house);
+}
+
+class LiveChart {
+  final double asc, mc;
+  final int ascSign;
+  final List<LiveBody> bodies;
+  const LiveChart(this.asc, this.mc, this.ascSign, this.bodies);
+}
+
+LiveChart computeChart(DateTime utc, double lat, double lonE, bool vedic) {
+  final jd = _julianDay(utc.year, utc.month, utc.day,
+    utc.hour + utc.minute / 60 + utc.second / 3600);
+  final t = (jd - 2451545.0) / 36525, ay = _ayanamsa(jd);
+  final ang = _anglesOf(jd, lonE, lat);
+  double asc = ang[0], mc = ang[1];
+  if (vedic) { asc = _norm(asc - ay); mc = _norm(mc - ay); }
+  final ascSign = (_norm(asc) / 30).floor();
+  final bodies = <LiveBody>[];
+  for (final k in _livePlanets) {
+    double tl = _lonAt(k, t);
+    if (vedic) tl = _norm(tl - ay);
+    bool retro = false;
+    if (k != 'Sun' && k != 'Moon' && k != 'Rahu' && k != 'Ketu') {
+      double b = _lonAt(k, t + 1 / 36525);
+      if (vedic) b = _norm(b - ay);
+      retro = (((b - tl + 540) % 360) - 180) < 0;
+    }
+    final sign = (_norm(tl) / 30).floor();
+    final house = ((sign - ascSign) % 12 + 12) % 12 + 1;
+    bodies.add(LiveBody(k, _norm(tl), retro, sign, house));
+  }
+  return LiveChart(_norm(asc), _norm(mc), ascSign, bodies);
+}
+
+class _Placed {
+  final LiveBody body;
+  final Offset pos;
+  const _Placed(this.body, this.pos);
+}
+
+class _WheelPainter extends CustomPainter {
+  final LiveChart chart;
+  _WheelPainter(this.chart);
+
+  Offset _pos(double lon, double r, double c) {
+    final a = (180 + (lon - chart.asc)) * _d2r;
+    return Offset(c + r * math.cos(a), c - r * math.sin(a));
+  }
+
+  void _label(Canvas cv, String s, Offset at, Color col, double fs, FontWeight w) {
+    final tp = TextPainter(
+      text: TextSpan(text: s, style: TextStyle(color: col, fontSize: fs, fontWeight: w)),
+      textDirection: TextDirection.ltr)..layout();
+    tp.paint(cv, Offset(at.dx - tp.width / 2, at.dy - tp.height / 2));
+  }
+
+  @override
+  void paint(Canvas cv, Size size) {
+    final c = size.width / 2;
+    final rOut = size.width / 2 - 6, rIn = rOut - 26;
+    final ring = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
+      ..color = const Color(0xFF4a3866);
+    cv.drawCircle(Offset(c, c), rOut, ring);
+    cv.drawCircle(Offset(c, c), rIn, ring);
+    for (int i = 0; i < 12; i++) {
+      final bl = i * 30.0;
+      cv.drawLine(_pos(bl, rIn, c), _pos(bl, rOut, c),
+        Paint()..color = const Color(0xFF4a3866)..strokeWidth = 1);
+      _label(cv, _signAbbr[i], _pos(i * 30.0 + 15, (rIn + rOut) / 2, c),
+        elementColor(signs[i].element), 11.5, FontWeight.w700);
+    }
+    // Ascendant marker at the left horizon
+    cv.drawLine(_pos(chart.asc, rIn - 6, c), _pos(chart.asc, rOut + 2, c),
+      Paint()..color = kGold..strokeWidth = 2.6);
+    _label(cv, 'ASC', _pos(chart.asc, rIn - 18, c), kGold, 10, FontWeight.w800);
+    cv.drawCircle(Offset(c, c), 2.5, Paint()..color = kGold);
+  }
+
+  @override
+  bool shouldRepaint(_WheelPainter o) => true;
+}
+
+class LiveSkyScreen extends StatefulWidget {
+  final bool vedic;
+  const LiveSkyScreen({super.key, required this.vedic});
+  @override
+  State<LiveSkyScreen> createState() => _LiveSkyScreenState();
+}
+
+class _LiveSkyScreenState extends State<LiveSkyScreen> {
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 60),
+      (_) { if (mounted) setState(() {}); });
+  }
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+
+  Widget _planetChip(LiveBody b) => SizedBox(width: 30, height: 30,
+    child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+      CachedNetworkImage(
+        imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+        width: 26, height: 26, fit: BoxFit.contain,
+        errorWidget: (_, __, ___) => Container(
+          width: 22, height: 22,
+          decoration: BoxDecoration(
+            color: _livePlanetColor[b.key], shape: BoxShape.circle),
+          alignment: Alignment.center,
+          child: Text(b.key[0],
+            style: const TextStyle(color: Colors.white, fontSize: 12,
+              fontWeight: FontWeight.w800)))),
+      if (b.retro) Positioned(right: 0, top: 0, child: Container(
+        width: 9, height: 9,
+        decoration: BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle,
+          border: Border.all(color: kBg, width: 1)))),
+    ]));
+
+  Widget _wheel(LiveChart chart) => LayoutBuilder(builder: (_, box) {
+    final sz = math.min(box.maxWidth, 360.0);
+    final c = sz / 2, rP = sz / 2 - 50;
+    final radii = [rP, rP - 22, rP - 44];
+    final sorted = [...chart.bodies]..sort((a, b) => a.lon.compareTo(b.lon));
+    final placed = <_Placed>[];
+    double prev = -999; int ri = 0;
+    for (final b in sorted) {
+      double dd = (b.lon - prev).abs(); if (dd > 180) dd = 360 - dd;
+      ri = dd < 12 ? (ri + 1) % radii.length : 0;
+      prev = b.lon;
+      final a = (180 + (b.lon - chart.asc)) * _d2r;
+      final r = radii[ri];
+      placed.add(_Placed(b, Offset(c + r * math.cos(a), c - r * math.sin(a))));
+    }
+    return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
+      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart)),
+      ...placed.map((p) => Positioned(
+        left: p.pos.dx - 15, top: p.pos.dy - 15, child: _planetChip(p.body))),
+    ])));
+  });
+
+  Widget _boxRow(LiveBody b, AppLang l) {
+    final signName = signs[b.sign].name[l] ?? signs[b.sign].name[AppLang.en]!;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        CachedNetworkImage(
+          imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+          width: 20, height: 20, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+        const SizedBox(width: 10),
+        Expanded(child: Text(b.key,
+          style: const TextStyle(color: kOn, fontSize: 14,
+            fontWeight: FontWeight.w700))),
+        if (b.retro) ...[
+          const Text('R', style: TextStyle(color: Colors.redAccent,
+            fontSize: 12, fontWeight: FontWeight.w800)),
+          const SizedBox(width: 6),
+        ],
+        Text('$signName ${_fmtDeg(b.lon)}',
+          style: TextStyle(color: kMuted, fontSize: 13,
+            fontWeight: FontWeight.w600, fontFamily: urduFont)),
+        const SizedBox(width: 8),
+        Text('H${b.house}', style: const TextStyle(color: kLight,
+          fontSize: 12, fontWeight: FontWeight.w700)),
+      ]));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = currentLang.value;
+    final city = _pickCity();
+    final lat = (city['lat'] as num).toDouble();
+    final lonE = (city['lon'] as num).toDouble();
+    final chart = computeChart(DateTime.now().toUtc(), lat, lonE, widget.vedic);
+    final ascWord = widget.vedic
+      ? {AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}[l]!
+      : {AppLang.en: 'Ascendant', AppLang.ur: 'طالع', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}[l]!;
+    final ascSignName = signs[chart.ascSign].name[l] ?? signs[chart.ascSign].name[AppLang.en]!;
+    final title = widget.vedic
+      ? {AppLang.en: 'Vedic — Live Sky', AppLang.ur: 'ویدک — لائیو اسکائی', AppLang.hi: 'वैदिक — लाइव स्काई', AppLang.ar: 'فيدي — السماء الحية'}[l]!
+      : {AppLang.en: 'Western — Live Sky', AppLang.ur: 'مغربی — لائیو اسکائی', AppLang.hi: 'पश्चिमी — लाइव स्काई', AppLang.ar: 'غربي — السماء الحية'}[l]!;
+
+    return Directionality(
+      textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: kBg,
+        appBar: AppBar(
+          backgroundColor: kBg, elevation: 0,
+          iconTheme: const IconThemeData(color: kGold),
+          title: Text(title, style: TextStyle(color: kGold, fontSize: 17,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        body: Center(child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(16, 12, 16,
+              28 + MediaQuery.of(context).viewPadding.bottom),
+            children: [
+              _wheel(chart),
+              const SizedBox(height: 8),
+              Center(child: Text('${city['n']}  ${_flag(city['c'] as String)}',
+                style: const TextStyle(color: kMuted, fontSize: 12.5,
+                  fontWeight: FontWeight.w600))),
+              const SizedBox(height: 14),
+              card(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  Row(children: [
+                    const Icon(Icons.arrow_upward, color: kGold, size: 18),
+                    const SizedBox(width: 6),
+                    Text('$ascWord: ',
+                      style: TextStyle(color: kGold, fontSize: 14.5,
+                        fontWeight: FontWeight.w800, fontFamily: urduFont)),
+                    Text('$ascSignName ${_fmtDeg(chart.asc)}',
+                      style: const TextStyle(color: kOn, fontSize: 14.5,
+                        fontWeight: FontWeight.w700)),
+                  ]),
+                  const Divider(color: kBorder, height: 20),
+                  ...chart.bodies.map((b) => _boxRow(b, l)),
+                ])),
+            ])))));
+  }
+}
+
+// ===========================================================================
 // NEW Today tab — Live Sky (Western + Vedic) and Rahu Kaal, refreshed live.
 // ===========================================================================
 class LiveSkyTab extends StatefulWidget {
@@ -1006,15 +1292,10 @@ class _LiveSkyTabState extends State<LiveSkyTab> {
     final phase = s.waxing ? _skyWords['wax']![l]! : _skyWords['wan']![l]!;
     final retroStr = s.retro
       .map((k) => _planetNamesLive[k]?[l] ?? k).join('، ');
-    // The LIVE SKY pages (current sky: circle chart + Ascendant + houses),
-    // NOT the birth-chart pages.
-    final url = vedic ? '$kWebsite/farooq-now-vedic.html'
-      : '$kWebsite/farooq-now-western.html';
-    final title = _skyEyebrow[vedic ? 'ved' : 'west']![l]!;
-
     return GestureDetector(
+      // Build 15: opens the NATIVE Live Sky (wheel + Ascendant + box).
       onTap: () => Navigator.push(context, MaterialPageRoute(
-        builder: (_) => WebViewScreen(url: url, title: title))),
+        builder: (_) => LiveSkyScreen(vedic: vedic))),
       child: card(child: Column(
         crossAxisAlignment: CrossAxisAlignment.center, children: [
           Text(_skyEyebrow[vedic ? 'ved' : 'west']![l]!,
