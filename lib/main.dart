@@ -9,8 +9,10 @@
 // (phones portrait+landscape, tablets). Live daily readings from Supabase
 // switch on in Phase 2 once the anon key + table names are wired in.
 // ===========================================================================
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -495,13 +497,16 @@ class _RootShellState extends State<RootShell> {
           fontSize: 18, letterSpacing: 3)),
     ),
     body: IndexedStack(index: _tab, children: const [
-      TodayTab(), ZodiacTab(), MatchTab(), MoreTab(),
+      LiveSkyTab(), TodayTab(), ZodiacTab(), MatchTab(), MoreTab(),
     ]),
     bottomNavigationBar: NavigationBar(
       selectedIndex: _tab,
       onDestinationSelected: (i) => setState(() => _tab = i),
       destinations: [
+        // Build 12: new Live Sky "Today" tab in front; the perfected sign
+        // tab is now "Zodiac". The old sign grid stays for now (removed later).
         NavigationDestination(icon: const Icon(Icons.auto_awesome), label: tr('today')),
+        NavigationDestination(icon: const Icon(Icons.brightness_7), label: tr('zodiac')),
         NavigationDestination(icon: const Icon(Icons.brightness_3), label: tr('zodiac')),
         NavigationDestination(icon: const Icon(Icons.favorite_outline), label: tr('match')),
         NavigationDestination(icon: const Icon(Icons.menu), label: tr('more')),
@@ -576,6 +581,371 @@ class SystemToggle extends StatelessWidget {
           }),
         ]));
     });
+}
+
+// ===========================================================================
+// Build 12: LIVE SKY — native port of the website's client-side astronomy
+// (Keplerian planet positions + truncated lunar series + Rahu Kaal). Verified
+// against the site: same formulas & constants, so it produces identical
+// Sun/Moon signs, moon phase, retrogrades and Rahu Kaal times — offline, no
+// WebView. Powers the new Today tab.
+// ===========================================================================
+const double _d2r = math.pi / 180, _r2d = 180 / math.pi;
+double _norm(double d) => ((d % 360) + 360) % 360;
+
+double _julianDay(int y, int m, int d, double hour) {
+  if (m <= 2) { y -= 1; m += 12; }
+  final a = (y / 100).floor(), b = 2 - a + (a / 4).floor();
+  return (365.25 * (y + 4716)).floor() + (30.6001 * (m + 1)).floor() +
+    d + b - 1524.5 + hour / 24;
+}
+
+// Keplerian orbital elements: [base(6), rate-per-century(6)]
+const Map<String, List<List<double>>> _elem = {
+  'mercury': [[0.38709927, 0.20563593, 7.00497902, 252.25032350, 77.45779628, 48.33076593], [0.00000037, 0.00001906, -0.00594749, 149472.67411175, 0.16047689, -0.12534081]],
+  'venus': [[0.72333566, 0.00677672, 3.39467605, 181.97909950, 131.60246718, 76.67984255], [0.00000390, -0.00004107, -0.00078890, 58517.81538729, 0.00268329, -0.27769418]],
+  'earth': [[1.00000261, 0.01671123, -0.00001531, 100.46457166, 102.93768193, 0.0], [0.00000562, -0.00004392, -0.01294668, 35999.37244981, 0.32327364, 0.0]],
+  'mars': [[1.52371034, 0.09339410, 1.84969142, -4.55343205, -23.94362959, 49.55953891], [0.00001847, 0.00007882, -0.00813131, 19140.30268499, 0.44441088, -0.29257343]],
+  'jupiter': [[5.20288700, 0.04838624, 1.30439695, 34.39644051, 14.72847983, 100.47390909], [-0.00011607, -0.00013253, -0.00183714, 3034.74612775, 0.21252668, 0.20469106]],
+  'saturn': [[9.53667594, 0.05386179, 2.48599187, 49.95424423, 92.59887831, 113.66242448], [-0.00125060, -0.00050991, 0.00193609, 1222.49362201, -0.41897216, -0.28867794]],
+};
+
+List<double> _helioXY(String name, double t) {
+  final a = _elem[name]!, v = a[0], r = a[1];
+  final sa = v[0] + r[0] * t, e = v[1] + r[1] * t, inc = (v[2] + r[2] * t) * _d2r,
+    l = v[3] + r[3] * t, peri = v[4] + r[4] * t, nodeD = v[5] + r[5] * t,
+    node = nodeD * _d2r, w = (peri - nodeD) * _d2r;
+  double m = _norm(l - peri); if (m > 180) m -= 360; m *= _d2r;
+  double ecc = m + e * math.sin(m);
+  for (int i = 0; i < 8; i++) {
+    final de = (ecc - e * math.sin(ecc) - m) / (1 - e * math.cos(ecc));
+    ecc -= de; if (de.abs() < 1e-9) break;
+  }
+  final xp = sa * (math.cos(ecc) - e), yp = sa * math.sqrt(1 - e * e) * math.sin(ecc);
+  final cw = math.cos(w), sw = math.sin(w), cn = math.cos(node), sn = math.sin(node),
+    ci = math.cos(inc);
+  return [(cw * cn - sw * sn * ci) * xp + (-sw * cn - cw * sn * ci) * yp,
+          (cw * sn + sw * cn * ci) * xp + (-sw * sn + cw * cn * ci) * yp];
+}
+
+double _precession(double t) => (5028.796195 * t + 1.1054348 * t * t) / 3600;
+double _planetLon(String name, double t) {
+  final p = _helioXY(name, t), ex = _helioXY('earth', t);
+  return _norm(math.atan2(p[1] - ex[1], p[0] - ex[0]) * _r2d + _precession(t));
+}
+double _sunLon(double t) {
+  final ex = _helioXY('earth', t);
+  return _norm(math.atan2(-ex[1], -ex[0]) * _r2d + _precession(t));
+}
+
+// Truncated lunar longitude series: [D, M, M', F, coeff]
+const List<List<int>> _moonTerms = [
+  [0,0,1,0,6288774],[2,0,-1,0,1274027],[2,0,0,0,658314],[0,0,2,0,213618],
+  [0,1,0,0,-185116],[0,0,0,2,-114332],[2,0,-2,0,58793],[2,-1,-1,0,57066],
+  [2,0,1,0,53322],[2,-1,0,0,45758],[0,1,-1,0,-40923],[1,0,0,0,-34720],
+  [0,1,1,0,-30383],[2,0,0,-2,15327],[0,0,1,2,-12528],[0,0,1,-2,10980],
+  [4,0,-1,0,10675],[0,0,3,0,10034],[4,0,-2,0,8548],[2,1,-1,0,-7888],
+  [2,1,0,0,-6766],[1,0,-1,0,-5163],[1,1,0,0,4987],[2,-1,1,0,4036],
+  [2,0,2,0,3994],[4,0,0,0,3861],[2,0,-3,0,3665],[0,1,-2,0,-2689],
+  [2,0,-1,2,-2602],[2,-1,-2,0,2390],[1,0,1,0,-2348],[2,-2,0,0,2236],
+  [0,1,2,0,-2120],[0,2,0,0,-2069],[2,-2,-1,0,2048],
+];
+double _moonLon(double t) {
+  final lp = 218.3164477 + 481267.88123421 * t - 0.0015786 * t * t + t * t * t / 538841 - t * t * t * t / 65194000;
+  final dm = 297.8501921 + 445267.1114034 * t - 0.0018819 * t * t + t * t * t / 545868 - t * t * t * t / 113065000;
+  final mm = 357.5291092 + 35999.0502909 * t - 0.0001536 * t * t + t * t * t / 24490000;
+  final mp = 134.9633964 + 477198.8675055 * t + 0.0087414 * t * t + t * t * t / 69699 - t * t * t * t / 14712000;
+  final f = 93.2720950 + 483202.0175233 * t - 0.0036539 * t * t - t * t * t / 3526000 + t * t * t * t / 863310000;
+  final ec = 1 - 0.002516 * t - 0.0000074 * t * t;
+  double s = 0;
+  for (final term in _moonTerms) {
+    final arg = (term[0] * dm + term[1] * mm + term[2] * mp + term[3] * f) * _d2r;
+    double co = term[4].toDouble();
+    if (term[1].abs() == 1) { co *= ec; } else if (term[1].abs() == 2) { co *= ec * ec; }
+    s += co * math.sin(arg);
+  }
+  return _norm(lp + s / 1000000);
+}
+
+double _ayanamsa(double jd) {
+  final y = 2000.0 + (jd - 2451545.0) / 365.25;
+  return 23.85 + (y - 2000) * 0.013969;
+}
+double _lonAt(String name, double t) => name == 'Sun'
+  ? _sunLon(t) : name == 'Moon' ? _moonLon(t) : _planetLon(name, t);
+double _motionOf(String name, double t) {
+  final a = _lonAt(name, t), b = _lonAt(name, t + 1 / 36525);
+  return ((b - a + 540) % 360) - 180;
+}
+
+// planets that can retrograde, with the mean-motion divisor used for the fade
+const Map<String, double> _retroDiv = {
+  'mercury': 1.3, 'venus': 0.62, 'mars': 0.4, 'jupiter': 0.14, 'saturn': 0.085,
+};
+
+class LiveSky {
+  final int sunW, moonW, sunV, moonV, illum;
+  final bool waxing;
+  final List<String> retro;
+  const LiveSky(this.sunW, this.moonW, this.sunV, this.moonV, this.illum,
+    this.waxing, this.retro);
+}
+
+LiveSky computeSky(DateTime u) {
+  final jd = _julianDay(u.year, u.month, u.day,
+    u.hour + u.minute / 60 + u.second / 3600);
+  final t = (jd - 2451545.0) / 36525, ay = _ayanamsa(jd);
+  final sunL = _sunLon(t), moonL = _moonLon(t);
+  final retro = <String>[];
+  _retroDiv.forEach((k, div) {
+    final m = _motionOf(k, t);
+    final rr = m < 0 ? math.min(1.0, (-m) / div) : 0.0;
+    if (rr > 0.45) retro.add(k);
+  });
+  final elong = _norm(moonL - sunL);
+  final illum = ((1 - math.cos(elong * _d2r)) / 2 * 100).round();
+  return LiveSky(
+    (_norm(sunL) / 30).floor(), (_norm(moonL) / 30).floor(),
+    (_norm(sunL - ay) / 30).floor(), (_norm(moonL - ay) / 30).floor(),
+    illum, elong < 180, retro);
+}
+
+// ---- Rahu Kaal ----
+const List<Map<String, dynamic>> _cities = [
+  {'n':'Doha','c':'QA','lat':25.29,'lon':51.53,'tz':3.0},
+  {'n':'Dubai','c':'AE','lat':25.2,'lon':55.27,'tz':4.0},
+  {'n':'Abu Dhabi','c':'AE','lat':24.45,'lon':54.38,'tz':4.0},
+  {'n':'Riyadh','c':'SA','lat':24.71,'lon':46.68,'tz':3.0},
+  {'n':'Manama','c':'BH','lat':26.23,'lon':50.59,'tz':3.0},
+  {'n':'Kuwait City','c':'KW','lat':29.38,'lon':47.99,'tz':3.0},
+  {'n':'Muscat','c':'OM','lat':23.59,'lon':58.41,'tz':4.0},
+  {'n':'Baghdad','c':'IQ','lat':33.31,'lon':44.36,'tz':3.0},
+  {'n':'Tehran','c':'IR','lat':35.69,'lon':51.39,'tz':3.5},
+  {'n':'Karachi','c':'PK','lat':24.86,'lon':67.01,'tz':5.0},
+  {'n':'Lahore','c':'PK','lat':31.55,'lon':74.34,'tz':5.0},
+  {'n':'Delhi','c':'IN','lat':28.61,'lon':77.21,'tz':5.5},
+  {'n':'Mumbai','c':'IN','lat':19.08,'lon':72.88,'tz':5.5},
+  {'n':'Dhaka','c':'BD','lat':23.81,'lon':90.41,'tz':6.0},
+  {'n':'Colombo','c':'LK','lat':6.93,'lon':79.86,'tz':5.5},
+  {'n':'Kathmandu','c':'NP','lat':27.72,'lon':85.32,'tz':5.75},
+  {'n':'Istanbul','c':'TR','lat':41.01,'lon':28.98,'tz':3.0},
+  {'n':'Cairo','c':'EG','lat':30.04,'lon':31.24,'tz':2.0},
+  {'n':'London','c':'GB','lat':51.51,'lon':-0.13,'tz':0.0},
+  {'n':'Paris','c':'FR','lat':48.86,'lon':2.35,'tz':1.0},
+  {'n':'New York','c':'US','lat':40.71,'lon':-74.01,'tz':-5.0},
+  {'n':'Los Angeles','c':'US','lat':34.05,'lon':-118.24,'tz':-8.0},
+  {'n':'Toronto','c':'CA','lat':43.65,'lon':-79.38,'tz':-5.0},
+  {'n':'Singapore','c':'SG','lat':1.35,'lon':103.82,'tz':8.0},
+  {'n':'Sydney','c':'AU','lat':-33.87,'lon':151.21,'tz':11.0},
+];
+const List<int> _rkPart = [8, 2, 7, 5, 6, 4, 3]; // Sun..Sat
+const List<String> _dowNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday',
+  'Thursday', 'Friday', 'Saturday'];
+
+Map<String, dynamic> _pickCity() {
+  final off = DateTime.now().timeZoneOffset.inMinutes / 60.0;
+  for (final c in _cities) {
+    if ((c['tz'] as num).toDouble() == off) return c;
+  }
+  return _cities[0]; // default Doha
+}
+
+String _flag(String cc) {
+  if (cc.length != 2) return '';
+  return String.fromCharCodes(
+    cc.toUpperCase().codeUnits.map((c) => 127397 + c));
+}
+
+String _hm(double h) {
+  int hh = h.floor();
+  int mm = ((h - hh) * 60).round();
+  if (mm == 60) { hh++; mm = 0; }
+  hh = ((hh % 24) + 24) % 24;
+  return '${hh.toString().padLeft(2, '0')}:${mm.toString().padLeft(2, '0')}';
+}
+
+class RahuInfo {
+  final bool ok;
+  final String start, end, rise, sunsetStr, city, flag;
+  final int dow;
+  const RahuInfo({required this.ok, this.start = '', this.end = '',
+    this.rise = '', this.sunsetStr = '', this.city = '', this.flag = '',
+    this.dow = 0});
+}
+
+RahuInfo computeRahu(DateTime local) {
+  final city = _pickCity();
+  final y = local.year, mo = local.month, d = local.day;
+  final dow = DateTime(y, mo, d).weekday % 7; // Dart Mon=1..Sun=7 -> Sun=0..Sat=6
+  final lat = (city['lat'] as num).toDouble(),
+    lon = (city['lon'] as num).toDouble(), tz = (city['tz'] as num).toDouble();
+  final n = (_julianDay(y, mo, d, 12) - 2451545.0).round();
+  final jstar = n - lon / 360;
+  final mDeg = ((357.5291 + 0.98560028 * jstar) % 360 + 360) % 360, mr = mDeg * _d2r;
+  final c = 1.9148 * math.sin(mr) + 0.0200 * math.sin(2 * mr) + 0.0003 * math.sin(3 * mr);
+  final lam = ((mDeg + c + 180 + 102.9372) % 360 + 360) % 360, lamr = lam * _d2r;
+  final jt = 2451545.0 + jstar + 0.0053 * math.sin(mr) - 0.0069 * math.sin(2 * lamr);
+  final sinDec = math.sin(lamr) * math.sin(23.4397 * _d2r), dec = math.asin(sinDec);
+  final cosw = (math.sin(-0.833 * _d2r) - math.sin(lat * _d2r) * sinDec) /
+    (math.cos(lat * _d2r) * math.cos(dec));
+  if (cosw > 1 || cosw < -1) return const RahuInfo(ok: false);
+  final w0 = math.acos(cosw) * _r2d;
+  double toL(double j) { final u = ((j + 0.5) % 1) * 24, l = u + tz; return ((l % 24) + 24) % 24; }
+  final rise = toL(jt - w0 / 360), setH = toL(jt + w0 / 360);
+  final p = (setH - rise) / 8, part = _rkPart[dow];
+  return RahuInfo(ok: true, start: _hm(rise + (part - 1) * p),
+    end: _hm(rise + part * p), rise: _hm(rise), sunsetStr: _hm(setH),
+    city: city['n'] as String, flag: _flag(city['c'] as String), dow: dow);
+}
+
+// small localisation for the Live Sky cards
+const Map<String, Map<AppLang, String>> _skyWords = {
+  'sun': {AppLang.en: 'Sun', AppLang.ur: 'سورج', AppLang.hi: 'सूर्य', AppLang.ar: 'الشمس'},
+  'moon': {AppLang.en: 'Moon', AppLang.ur: 'چاند', AppLang.hi: 'चंद्र', AppLang.ar: 'القمر'},
+  'wax': {AppLang.en: 'Waxing', AppLang.ur: 'بڑھتا', AppLang.hi: 'बढ़ता', AppLang.ar: 'متزايد'},
+  'wan': {AppLang.en: 'Waning', AppLang.ur: 'گھٹتا', AppLang.hi: 'घटता', AppLang.ar: 'متناقص'},
+  'retro': {AppLang.en: 'Retrograde', AppLang.ur: 'رجعت', AppLang.hi: 'वक्री', AppLang.ar: 'تراجع'},
+  'rahu': {AppLang.en: 'Rahu Kaal', AppLang.ur: 'راہو کال', AppLang.hi: 'राहु काल', AppLang.ar: 'راهو كال'},
+  'sunrise': {AppLang.en: 'sunrise', AppLang.ur: 'طلوع', AppLang.hi: 'सूर्योदय', AppLang.ar: 'الشروق'},
+  'sunset': {AppLang.en: 'sunset', AppLang.ur: 'غروب', AppLang.hi: 'सूर्यास्त', AppLang.ar: 'الغروب'},
+};
+const Map<String, Map<AppLang, String>> _skyEyebrow = {
+  'west': {AppLang.en: 'WESTERN · LIVE SKY', AppLang.ur: 'مغربی · لائیو اسکائی', AppLang.hi: 'पश्चिमी · लाइव स्काई', AppLang.ar: 'غربي · السماء الحية'},
+  'ved': {AppLang.en: 'VEDIC · LIVE SKY', AppLang.ur: 'ویدک · لائیو اسکائی', AppLang.hi: 'वैदिक · लाइव स्काई', AppLang.ar: 'فيدي · السماء الحية'},
+};
+const Map<String, Map<AppLang, String>> _planetNamesLive = {
+  'mercury': {AppLang.en: 'Mercury', AppLang.ur: 'عطارد', AppLang.hi: 'बुध', AppLang.ar: 'عطارد'},
+  'venus': {AppLang.en: 'Venus', AppLang.ur: 'زہرہ', AppLang.hi: 'शुक्र', AppLang.ar: 'الزهرة'},
+  'mars': {AppLang.en: 'Mars', AppLang.ur: 'مریخ', AppLang.hi: 'मंगल', AppLang.ar: 'المريخ'},
+  'jupiter': {AppLang.en: 'Jupiter', AppLang.ur: 'مشتری', AppLang.hi: 'बृहस्पति', AppLang.ar: 'المشتري'},
+  'saturn': {AppLang.en: 'Saturn', AppLang.ur: 'زحل', AppLang.hi: 'शनि', AppLang.ar: 'زحل'},
+};
+
+// ===========================================================================
+// NEW Today tab — Live Sky (Western + Vedic) and Rahu Kaal, refreshed live.
+// ===========================================================================
+class LiveSkyTab extends StatefulWidget {
+  const LiveSkyTab({super.key});
+  @override
+  State<LiveSkyTab> createState() => _LiveSkyTabState();
+}
+
+class _LiveSkyTabState extends State<LiveSkyTab> {
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 60),
+      (_) { if (mounted) setState(() {}); });
+  }
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+
+  String _bodyLine(String bodyKey, String signName, AppLang l) {
+    final w = _skyWords[bodyKey]![l]!;
+    switch (l) {
+      case AppLang.en: return '$w in $signName';
+      case AppLang.ar: return '$w في $signName';
+      case AppLang.ur: return '$w $signName میں';
+      case AppLang.hi: return '$w $signName में';
+    }
+  }
+
+  Widget _liveIcon(String file) => CachedNetworkImage(
+    imageUrl: '$kWebsite/app/planet-icons-v2/$file',
+    width: 18, height: 18, fit: BoxFit.contain,
+    errorWidget: (_, __, ___) => const SizedBox(width: 18, height: 18));
+
+  Widget _skyCard(bool vedic, LiveSky s) {
+    final l = currentLang.value;
+    final sunIdx = vedic ? s.sunV : s.sunW;
+    final moonIdx = vedic ? s.moonV : s.moonW;
+    final sunName = signs[sunIdx].name[l] ?? signs[sunIdx].name[AppLang.en]!;
+    final moonName = signs[moonIdx].name[l] ?? signs[moonIdx].name[AppLang.en]!;
+    final phase = s.waxing ? _skyWords['wax']![l]! : _skyWords['wan']![l]!;
+    final retroStr = s.retro
+      .map((k) => _planetNamesLive[k]?[l] ?? k).join('، ');
+    final url = vedic ? '$kWebsite/farooq-vedic.html'
+      : '$kWebsite/farooq-western.html';
+
+    return GestureDetector(
+      onTap: () => openUrl(url),
+      child: card(child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center, children: [
+          Text(_skyEyebrow[vedic ? 'ved' : 'west']![l]!,
+            style: TextStyle(color: kGold, fontSize: 11.5,
+              fontWeight: FontWeight.w800, letterSpacing: 1.4,
+              fontFamily: urduFont)),
+          const SizedBox(height: 12),
+          Wrap(alignment: WrapAlignment.center, crossAxisAlignment:
+            WrapCrossAlignment.center, spacing: 14, runSpacing: 8, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              _liveIcon('sun.png'), const SizedBox(width: 6),
+              Text(_bodyLine('sun', sunName, l),
+                style: const TextStyle(color: kOn, fontSize: 15.5,
+                  fontWeight: FontWeight.w700)),
+            ]),
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              _liveIcon('moon.png'), const SizedBox(width: 6),
+              Text(_bodyLine('moon', moonName, l),
+                style: const TextStyle(color: kOn, fontSize: 15.5,
+                  fontWeight: FontWeight.w700)),
+            ]),
+          ]),
+          const SizedBox(height: 8),
+          Text(
+            '— $phase ${s.illum}%'
+            '${retroStr.isNotEmpty ? '  ·  $retroStr ${_skyWords['retro']![l]!}' : ''}',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: kMuted, fontSize: 13, height: 1.5,
+              fontWeight: FontWeight.w600, fontFamily: urduFont)),
+        ])));
+  }
+
+  Widget _rahuBar(RahuInfo r, AppLang l) {
+    if (!r.ok) return const SizedBox.shrink();
+    return card(child: Column(crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          const Text('☾', style: TextStyle(color: kGold, fontSize: 17)),
+          const SizedBox(width: 7),
+          Text(_skyWords['rahu']![l]!,
+            style: TextStyle(color: kGold, fontSize: 14.5,
+              fontWeight: FontWeight.w800, fontFamily: urduFont)),
+          const SizedBox(width: 10),
+          Text('${r.start} – ${r.end}',
+            style: const TextStyle(color: kLight, fontSize: 14.5,
+              fontWeight: FontWeight.w800)),
+        ]),
+        const SizedBox(height: 7),
+        Text(
+          '${_dowNames[r.dow]}  ·  ${_skyWords['sunrise']![l]!} ${r.rise}'
+          '  ·  ${_skyWords['sunset']![l]!} ${r.sunsetStr}',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: kMuted, fontSize: 12.5, height: 1.5,
+            fontWeight: FontWeight.w600, fontFamily: urduFont)),
+        const SizedBox(height: 4),
+        Text('${r.city} ${r.flag}',
+          style: const TextStyle(color: kOn, fontSize: 13,
+            fontWeight: FontWeight.w700)),
+      ]));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = currentLang.value;
+    final sky = computeSky(DateTime.now().toUtc());
+    final rahu = computeRahu(DateTime.now());
+    return CenteredList(children: [
+      Padding(padding: const EdgeInsets.only(bottom: 14),
+        child: Text(todayLine(), textAlign: TextAlign.center,
+          style: TextStyle(color: kGold, fontSize: 15,
+            fontWeight: FontWeight.w700, fontFamily: urduFont))),
+      _skyCard(false, sky),
+      _skyCard(true, sky),
+      _rahuBar(rahu, l),
+    ]);
+  }
 }
 
 // ===========================================================================
