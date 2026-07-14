@@ -10,6 +10,7 @@
 // switch on in Phase 2 once the anon key + table names are wired in.
 // ===========================================================================
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -537,16 +538,25 @@ class SystemToggle extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<bool>(
     valueListenable: useVedic,
     builder: (_, vedic, __) {
-      Widget half(String label, bool sel, VoidCallback tap) => Expanded(
-        child: GestureDetector(onTap: tap, child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: sel ? kPrimary : Colors.transparent,
-            borderRadius: BorderRadius.circular(99)),
-          child: Text(label, textAlign: TextAlign.center,
-            style: TextStyle(color: sel ? Colors.white : kMuted,
-              fontWeight: FontWeight.w700, fontSize: 13.5)))));
+      // Western = Sun, Vedic = Moon — the app's own planet icons.
+      Widget half(String label, String iconUrl, bool sel, VoidCallback tap) =>
+        Expanded(
+          child: GestureDetector(onTap: tap, child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: BoxDecoration(
+              color: sel ? kPrimary : Colors.transparent,
+              borderRadius: BorderRadius.circular(99)),
+            child: Row(mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min, children: [
+                CachedNetworkImage(imageUrl: iconUrl, width: 18, height: 18,
+                  fit: BoxFit.contain,
+                  errorWidget: (_, __, ___) => const SizedBox.shrink()),
+                const SizedBox(width: 7),
+                Text(label, textAlign: TextAlign.center,
+                  style: TextStyle(color: sel ? Colors.white : kMuted,
+                    fontWeight: FontWeight.w700, fontSize: 13.5)),
+              ]))));
       return Container(
         margin: const EdgeInsets.only(bottom: 14),
         padding: const EdgeInsets.all(4),
@@ -554,11 +564,13 @@ class SystemToggle extends StatelessWidget {
           borderRadius: BorderRadius.circular(99),
           border: Border.all(color: kBorder)),
         child: Row(children: [
-          half(tr('western'), !vedic, () {
+          half(tr('western'), '$kWebsite/app/planet-icons-v2/sun.png',
+            !vedic, () {
             useVedic.value = false;
             prefs.setBool('useVedic', false);
           }),
-          half(tr('vedic'), vedic, () {
+          half(tr('vedic'), '$kWebsite/app/planet-icons-v2/moon.png',
+            vedic, () {
             useVedic.value = true;
             prefs.setBool('useVedic', true);
           }),
@@ -918,10 +930,24 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
       ..writeln('')
       ..writeln('🌐 $web')
       ..writeln('📲 Farooq Stars: $kWebsite');
+    final text = buf.toString();
 
+    // Attach the big sign artwork on top of the message, then let the user
+    // pick WhatsApp. If the image can't be fetched, fall back to a text-only
+    // WhatsApp share via wa.me.
+    try {
+      final i = signs.indexOf(sign);
+      final resp = await http.get(Uri.parse(signBigArtUrl(i)))
+        .timeout(const Duration(seconds: 20));
+      if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
+        final f = File('${Directory.systemTemp.path}/farooq_${sign.key}.png');
+        await f.writeAsBytes(resp.bodyBytes);
+        await Share.shareXFiles([XFile(f.path)], text: text);
+        return;
+      }
+    } catch (_) {/* fall through to text-only */}
     // wa.me opens WhatsApp directly (app if installed, else web WhatsApp).
-    await openUrl(
-      'https://wa.me/?text=${Uri.encodeComponent(buf.toString())}');
+    await openUrl('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 
   @override
