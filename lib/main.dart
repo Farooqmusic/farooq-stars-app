@@ -1251,13 +1251,27 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       ]));
   }
 
+  // ±90-day time travel for the whole sky. The astronomy already takes a
+  // DateTime, so we just offset "now" by _dayOffset days and recompute.
+  int _dayOffset = 0;
+  Widget _dayArrow(IconData ic, int dir) => Material(
+    color: kCard, shape: const CircleBorder(),
+    child: InkWell(
+      customBorder: const CircleBorder(),
+      onTap: () => setState(() =>
+        _dayOffset = (_dayOffset + dir).clamp(-90, 90).toInt()),
+      child: Padding(padding: const EdgeInsets.all(8),
+        child: Icon(ic, color: kGold, size: 22))));
+  String _liveDateLabel(DateTime t) => '${t.day}/${t.month}/${t.year}';
+
   @override
   Widget build(BuildContext context) {
     final l = currentLang.value;
     final city = _pickCity();
     final lat = (city['lat'] as num).toDouble();
     final lonE = (city['lon'] as num).toDouble();
-    final chart = computeChart(DateTime.now().toUtc(), lat, lonE, widget.vedic);
+    final baseTime = DateTime.now().add(Duration(days: _dayOffset));
+    final chart = computeChart(baseTime.toUtc(), lat, lonE, widget.vedic);
     final ascWord = widget.vedic
       ? {AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}[l]!
       : {AppLang.en: 'Ascendant', AppLang.ur: 'طالع', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}[l]!;
@@ -1281,7 +1295,26 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
             padding: EdgeInsets.fromLTRB(16, 12, 16,
               28 + MediaQuery.of(context).viewPadding.bottom),
             children: [
-              _wheel(chart),
+              // Wheel with ±day time-travel arrows at the bottom corners.
+              Stack(alignment: Alignment.bottomCenter, children: [
+                _wheel(chart),
+                Positioned(left: 0, bottom: 0,
+                  child: _dayArrow(Icons.chevron_left, -1)),
+                Positioned(right: 0, bottom: 0,
+                  child: _dayArrow(Icons.chevron_right, 1)),
+              ]),
+              const SizedBox(height: 6),
+              Center(child: GestureDetector(
+                onTap: _dayOffset == 0
+                  ? null : () => setState(() => _dayOffset = 0),
+                child: Text(
+                  _dayOffset == 0
+                    ? _liveDateLabel(baseTime)
+                    : '${_liveDateLabel(baseTime)}   ·   ${tr('today')} ⟲',
+                  style: TextStyle(
+                    color: _dayOffset == 0 ? kMuted : kGold,
+                    fontSize: 12.5, fontWeight: FontWeight.w700,
+                    fontFamily: urduFont)))),
               const SizedBox(height: 8),
               Center(child: Text('${city['n']}  ${_flag(city['c'] as String)}',
                 style: const TextStyle(color: kMuted, fontSize: 12.5,
