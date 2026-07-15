@@ -1138,6 +1138,26 @@ class _WheelPainter extends CustomPainter {
   bool shouldRepaint(_WheelPainter o) => true;
 }
 
+// North-Indian square chart frame: outer square + both diagonals + the
+// mid-point diamond. Together these carve the 12 houses. House content
+// (sign + planets) is placed as widgets in _box().
+class _BoxPainter extends CustomPainter {
+  @override
+  void paint(Canvas cv, Size size) {
+    final s = size.width;
+    final p = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
+      ..color = const Color(0xFF4a3866);
+    cv.drawRect(Rect.fromLTWH(0, 0, s, s), p);
+    cv.drawLine(const Offset(0, 0), Offset(s, s), p);
+    cv.drawLine(Offset(s, 0), Offset(0, s), p);
+    cv.drawPath(Path()
+      ..moveTo(s / 2, 0)..lineTo(s, s / 2)..lineTo(s / 2, s)..lineTo(0, s / 2)
+      ..close(), p);
+  }
+  @override
+  bool shouldRepaint(_BoxPainter o) => false;
+}
+
 class LiveSkyScreen extends StatefulWidget {
   final bool vedic;
   const LiveSkyScreen({super.key, required this.vedic});
@@ -1311,6 +1331,70 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
               ])));
       }));
 
+  // Circle ⟷ Box view toggle (default: circle).
+  bool _boxMode = false;
+  Widget _viewToggle(bool boxMode, IconData ic) {
+    final active = _boxMode == boxMode;
+    return Material(
+      color: active ? kGold : kCard, shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => setState(() => _boxMode = boxMode),
+        child: Padding(padding: const EdgeInsets.all(9),
+          child: Icon(ic, color: active ? kBg : kLight, size: 22))));
+  }
+
+  // House-content centres for the North-Indian square (unit square, top-left
+  // origin), index 0 = House 1 … index 11 = House 12.
+  static const List<List<double>> _houseC = [
+    [0.50, 0.26], [0.26, 0.14], [0.14, 0.26], [0.28, 0.50],
+    [0.14, 0.74], [0.26, 0.86], [0.50, 0.74], [0.74, 0.86],
+    [0.86, 0.74], [0.72, 0.50], [0.86, 0.26], [0.74, 0.14],
+  ];
+  Widget _boxPlanet(LiveBody b) => SizedBox(width: 17, height: 17,
+    child: Stack(clipBehavior: Clip.none, alignment: Alignment.center,
+      children: [
+        if (b.retro) CachedNetworkImage(
+          imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+          width: 20, height: 20, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox.shrink()),
+        CachedNetworkImage(
+          imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+          width: 14, height: 14, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox(width: 14, height: 14)),
+      ]));
+  Widget _boxHouse(int signIdx, List<LiveBody> here) => Column(
+    mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      CachedNetworkImage(
+        imageUrl: signSymbolUrl(signIdx, vedic: widget.vedic),
+        width: 16, height: 16, fit: BoxFit.contain,
+        errorWidget: (_, __, ___) => const SizedBox(width: 16, height: 16)),
+      if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 1),
+        child: Wrap(spacing: 1, runSpacing: 1, alignment: WrapAlignment.center,
+          children: here.map(_boxPlanet).toList())),
+    ]);
+  // House 1 = the tapped sign (_selSign) or, if none, the Ascendant's sign;
+  // the rest settle around it (whole-sign houses).
+  Widget _box(LiveChart chart) => LayoutBuilder(builder: (_, box) {
+    final sz = math.min(box.maxWidth, 360.0);
+    final h1 = _selSign ?? chart.ascSign;
+    final kids = <Widget>[
+      CustomPaint(size: Size(sz, sz), painter: _BoxPainter()),
+    ];
+    for (int h = 1; h <= 12; h++) {
+      final signIdx = (h1 + h - 1) % 12;
+      final here = chart.bodies.where((b) =>
+        ((b.sign - h1) % 12 + 12) % 12 + 1 == h).toList();
+      final cx = _houseC[h - 1][0] * sz, cy = _houseC[h - 1][1] * sz;
+      kids.add(Positioned(
+        left: cx - 36, top: cy - 32, width: 72, height: 64,
+        child: Center(child: _boxHouse(signIdx, here))));
+    }
+    return Center(child: SizedBox(width: sz, height: sz,
+      child: Stack(children: kids)));
+  });
+
   @override
   Widget build(BuildContext context) {
     final l = currentLang.value;
@@ -1367,28 +1451,36 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
                 _hourPill('+1h', 1),
               ]),
               const SizedBox(height: 10),
-              // 12 zodiac signs — tap to select (drives the Box view later).
-              _zodiacStrip(),
-              const SizedBox(height: 10),
-              _wheel(chart),
+              // 12 zodiac signs — shown ONLY in Box mode. Tapping one makes it
+              // House 1 and rearranges the box (they don't apply to the circle).
+              if (_boxMode) ...[
+                _zodiacStrip(),
+                const SizedBox(height: 10),
+              ],
+              _boxMode ? _box(chart) : _wheel(chart),
               const SizedBox(height: 8),
-              // Date + ±90-day arrows, moved below the wheel.
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                _dayArrow(Icons.chevron_left, -1),
-                const SizedBox(width: 16),
-                GestureDetector(
-                  onTap: _dayOffset == 0
-                    ? null : () => setState(() => _dayOffset = 0),
-                  child: Text(
-                    _dayOffset == 0
-                      ? _liveDateLabel(baseTime)
-                      : '${_liveDateLabel(baseTime)}  ⟲',
-                    style: TextStyle(
-                      color: _dayOffset == 0 ? kMuted : kGold,
-                      fontSize: 13, fontWeight: FontWeight.w800,
-                      fontFamily: urduFont))),
-                const SizedBox(width: 16),
-                _dayArrow(Icons.chevron_right, 1),
+              // Bottom bar: Circle toggle (left) · date nav · Box toggle (right).
+              Row(children: [
+                _viewToggle(false, Icons.circle_outlined),
+                Expanded(child: Center(child: Row(
+                  mainAxisSize: MainAxisSize.min, children: [
+                    _dayArrow(Icons.chevron_left, -1),
+                    const SizedBox(width: 12),
+                    GestureDetector(
+                      onTap: _dayOffset == 0
+                        ? null : () => setState(() => _dayOffset = 0),
+                      child: Text(
+                        _dayOffset == 0
+                          ? _liveDateLabel(baseTime)
+                          : '${_liveDateLabel(baseTime)}  ⟲',
+                        style: TextStyle(
+                          color: _dayOffset == 0 ? kMuted : kGold,
+                          fontSize: 13, fontWeight: FontWeight.w800,
+                          fontFamily: urduFont))),
+                    const SizedBox(width: 12),
+                    _dayArrow(Icons.chevron_right, 1),
+                  ]))),
+                _viewToggle(true, Icons.crop_square),
               ]),
               const SizedBox(height: 14),
               card(child: Column(
