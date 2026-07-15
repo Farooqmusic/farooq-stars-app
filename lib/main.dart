@@ -1183,7 +1183,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
     final bool isSun = b.key == 'Sun';
     final double icon = isSun ? 28 : 22;
     final double glow = icon + 14;
-    return SizedBox(width: 40, height: 40,
+    return SizedBox(width: 40, height: 44,
       child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
         if (b.retro) CachedNetworkImage(
           imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
@@ -1200,6 +1200,11 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
             child: Text(b.key[0],
               style: const TextStyle(color: Colors.white, fontSize: 12,
                 fontWeight: FontWeight.w800)))),
+        // Degree within the sign (compact) under the planet.
+        Positioned(bottom: 0, child: Text(
+          '${(b.lon % 30).floor()}°',
+          style: const TextStyle(color: kLight, fontSize: 8.5,
+            fontWeight: FontWeight.w800))),
       ]));
   }
 
@@ -1233,7 +1238,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
             errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)));
       }),
       ...placed.map((p) => Positioned(
-        left: p.pos.dx - 20, top: p.pos.dy - 20, child: _planetChip(p.body))),
+        left: p.pos.dx - 20, top: p.pos.dy - 22, child: _planetChip(p.body))),
     ])));
   });
 
@@ -1351,27 +1356,32 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
     [0.14, 0.74], [0.26, 0.86], [0.50, 0.74], [0.74, 0.86],
     [0.86, 0.74], [0.72, 0.50], [0.86, 0.26], [0.74, 0.14],
   ];
-  Widget _boxPlanet(LiveBody b) => SizedBox(width: 17, height: 17,
-    child: Stack(clipBehavior: Clip.none, alignment: Alignment.center,
-      children: [
-        if (b.retro) CachedNetworkImage(
-          imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
-          width: 20, height: 20, fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => const SizedBox.shrink()),
-        CachedNetworkImage(
-          imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
-          width: 14, height: 14, fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => const SizedBox(width: 14, height: 14)),
-      ]));
+  Widget _boxPlanet(LiveBody b) => SizedBox(width: 26,
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(width: 26, height: 26,
+        child: Stack(alignment: Alignment.center, children: [
+          if (b.retro) CachedNetworkImage(
+            imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+            width: 26, height: 26, fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => const SizedBox.shrink()),
+          CachedNetworkImage(
+            imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+            width: 20, height: 20, fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+        ])),
+      Text('${(b.lon % 30).floor()}°',
+        style: const TextStyle(color: kMuted, fontSize: 7.5,
+          fontWeight: FontWeight.w700)),
+    ]));
   Widget _boxHouse(int signIdx, List<LiveBody> here) => Column(
     mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center,
     children: [
       CachedNetworkImage(
         imageUrl: signSymbolUrl(signIdx, vedic: widget.vedic),
-        width: 16, height: 16, fit: BoxFit.contain,
-        errorWidget: (_, __, ___) => const SizedBox(width: 16, height: 16)),
-      if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 1),
-        child: Wrap(spacing: 1, runSpacing: 1, alignment: WrapAlignment.center,
+        width: 22, height: 22, fit: BoxFit.contain,
+        errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)),
+      if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2),
+        child: Wrap(spacing: 2, runSpacing: 1, alignment: WrapAlignment.center,
           children: here.map(_boxPlanet).toList())),
     ]);
   // House 1 = the tapped sign (_selSign) or, if none, the Ascendant's sign;
@@ -1388,8 +1398,9 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         ((b.sign - h1) % 12 + 12) % 12 + 1 == h).toList();
       final cx = _houseC[h - 1][0] * sz, cy = _houseC[h - 1][1] * sz;
       kids.add(Positioned(
-        left: cx - 36, top: cy - 32, width: 72, height: 64,
-        child: Center(child: _boxHouse(signIdx, here))));
+        left: cx - 44, top: cy - 36, width: 88, height: 72,
+        child: Center(child: FittedBox(fit: BoxFit.scaleDown,
+          child: _boxHouse(signIdx, here)))));
     }
     return Center(child: SizedBox(width: sz, height: sz,
       child: Stack(children: kids)));
@@ -1442,7 +1453,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
                   onTap: _hourOffset == 0
                     ? null : () => setState(() => _hourOffset = 0),
                   child: Text(
-                    '$ascWord  ${baseTime.hour.toString().padLeft(2, '0')}:${baseTime.minute.toString().padLeft(2, '0')}${_hourOffset == 0 ? '' : '  ⟲'}',
+                    '$ascWord  $ascSignName  ${baseTime.hour.toString().padLeft(2, '0')}:${baseTime.minute.toString().padLeft(2, '0')}${_hourOffset == 0 ? '' : '  ⟲'}',
                     style: TextStyle(
                       color: _hourOffset == 0 ? kMuted : kLight,
                       fontSize: 12.5, fontWeight: FontWeight.w800,
