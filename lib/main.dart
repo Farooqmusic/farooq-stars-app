@@ -1108,8 +1108,9 @@ class _WheelPainter extends CustomPainter {
       final bl = i * 30.0;
       cv.drawLine(_pos(bl, rIn, c), _pos(bl, rOut, c),
         Paint()..color = const Color(0xFF4a3866)..strokeWidth = 1);
-      _label(cv, _signAbbr[i], _pos(i * 30.0 + 15, (rIn + rOut) / 2, c),
-        elementColor(signs[i].element), 11.5, FontWeight.w700);
+      // Sign SYMBOL icons are drawn as widgets in _wheel() (vedic-aware:
+      // zsymbol*.png for Western, hzsymbol*.png for Vedic rashis), so the old
+      // text abbreviations (Ari/Tau/…) are no longer painted here.
       // whole-sign house number (house 1 = Ascendant's sign)
       final hn = ((i - chart.ascSign) % 12 + 12) % 12 + 1;
       _label(cv, '$hn', _pos(i * 30.0 + 15, rHouse - 11, c),
@@ -1197,8 +1198,20 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       final r = radii[ri];
       placed.add(_Placed(b, Offset(c + r * math.cos(a), c - r * math.sin(a))));
     }
+    final signR = sz / 2 - 32; // ring midline — matches the painter's labels
     return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
       CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart)),
+      // Sign symbol icons around the ring (Western zodiac / Vedic rashi).
+      ...List.generate(12, (i) {
+        final a = (180 + (i * 30.0 + 15 - chart.asc)) * _d2r;
+        final pos = Offset(c + signR * math.cos(a), c - signR * math.sin(a));
+        return Positioned(
+          left: pos.dx - 11, top: pos.dy - 11,
+          child: CachedNetworkImage(
+            imageUrl: signSymbolUrl(i, vedic: widget.vedic),
+            width: 22, height: 22, fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)));
+      }),
       ...placed.map((p) => Positioned(
         left: p.pos.dx - 20, top: p.pos.dy - 20, child: _planetChip(p.body))),
     ])));
@@ -1208,10 +1221,18 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
     final signName = signs[b.sign].name[l] ?? signs[b.sign].name[AppLang.en]!;
     return Padding(padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
-        CachedNetworkImage(
-          imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
-          width: 20, height: 20, fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+        // Planet icon with a magenta retro glow behind it when retrograde.
+        SizedBox(width: 28, height: 28, child: Stack(
+          clipBehavior: Clip.none, alignment: Alignment.center, children: [
+            if (b.retro) CachedNetworkImage(
+              imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+              width: 26, height: 26, fit: BoxFit.contain,
+              errorWidget: (_, __, ___) => const SizedBox.shrink()),
+            CachedNetworkImage(
+              imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+              width: 20, height: 20, fit: BoxFit.contain,
+              errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+          ])),
         const SizedBox(width: 10),
         Expanded(child: Text(b.key,
           style: const TextStyle(color: kOn, fontSize: 14,
