@@ -1011,6 +1011,15 @@ const Map<String, Color> _livePlanetColor = {
   'Saturn': Color(0xFFd8c084), 'Uranus': Color(0xFF7fd4e0), 'Neptune': Color(0xFF45c0c0),
   'Pluto': Color(0xFFb576e0), 'Rahu': Color(0xFFa3b3c0), 'Ketu': Color(0xFFcf9a6a),
 };
+// 27 nakshatras from 0° sidereal Aries. Long compound names are abbreviated
+// like the website (U.Phalguni, P.Ashadha, U.Bhadra …).
+const List<String> _nakshatras = [
+  'Ashwini', 'Bharani', 'Krittika', 'Rohini', 'Mrigashira', 'Ardra',
+  'Punarvasu', 'Pushya', 'Ashlesha', 'Magha', 'P.Phalguni', 'U.Phalguni',
+  'Hasta', 'Chitra', 'Swati', 'Vishakha', 'Anuradha', 'Jyeshtha', 'Mula',
+  'P.Ashadha', 'U.Ashadha', 'Shravana', 'Dhanishta', 'Shatabhisha',
+  'P.Bhadra', 'U.Bhadra', 'Revati',
+];
 const List<String> _signAbbr = ['Ari', 'Tau', 'Gem', 'Cnc', 'Leo', 'Vir',
   'Lib', 'Sco', 'Sag', 'Cap', 'Aqr', 'Psc'];
 
@@ -1068,7 +1077,8 @@ class _Placed {
 
 class _WheelPainter extends CustomPainter {
   final LiveChart chart;
-  _WheelPainter(this.chart);
+  final bool vedic;
+  _WheelPainter(this.chart, {this.vedic = false});
 
   Offset _pos(double lon, double r, double c) {
     final a = (180 + (lon - chart.asc)) * _d2r;
@@ -1085,7 +1095,7 @@ class _WheelPainter extends CustomPainter {
   @override
   void paint(Canvas cv, Size size) {
     final c = size.width / 2;
-    final rOut = size.width / 2 - 20, rIn = rOut - 24;
+    final rOut = size.width / 2 - (vedic ? 34.0 : 20.0), rIn = rOut - 24;
     final rHouse = rIn - 22;
     final ring = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
       ..color = const Color(0xFF4a3866);
@@ -1115,6 +1125,33 @@ class _WheelPainter extends CustomPainter {
       final hn = ((i - chart.ascSign) % 12 + 12) % 12 + 1;
       _label(cv, '$hn', _pos(i * 30.0 + 15, rHouse - 11, c),
         elementColor(signs[i].element), 9.5, FontWeight.w700);
+    }
+    // Vedic only: 27-nakshatra ring in the outer band, names rotated tangentially.
+    if (vedic) {
+      final rNakOut = size.width / 2 - 6;
+      final rNakLbl = (rOut + rNakOut) / 2;
+      cv.drawCircle(Offset(c, c), rNakOut,
+        Paint()..style = PaintingStyle.stroke..strokeWidth = 1
+          ..color = const Color(0x33c77dff));
+      const step = 360.0 / 27.0;
+      for (int n = 0; n < 27; n++) {
+        cv.drawLine(_pos(n * step, rOut, c), _pos(n * step, rNakOut, c),
+          Paint()..color = const Color(0x334a3866)..strokeWidth = 0.7);
+        final pos = _pos(n * step + step / 2, rNakLbl, c);
+        double rot = math.atan2(pos.dy - c, pos.dx - c) + math.pi / 2;
+        if (rot > math.pi / 2) rot -= math.pi;
+        if (rot < -math.pi / 2) rot += math.pi;
+        final tp = TextPainter(
+          text: TextSpan(text: _nakshatras[n],
+            style: const TextStyle(color: kMuted, fontSize: 7,
+              fontWeight: FontWeight.w600)),
+          textDirection: TextDirection.ltr)..layout();
+        cv.save();
+        cv.translate(pos.dx, pos.dy);
+        cv.rotate(rot);
+        tp.paint(cv, Offset(-tp.width / 2, -tp.height / 2));
+        cv.restore();
+      }
     }
     // Axis cross — horizon (ASC–DESC) and meridian (MC–IC)
     final desc = _norm(chart.asc + 180), ic = _norm(chart.mc + 180);
@@ -1223,9 +1260,9 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       final r = radii[ri];
       placed.add(_Placed(b, Offset(c + r * math.cos(a), c - r * math.sin(a))));
     }
-    final signR = sz / 2 - 32; // ring midline — matches the painter's labels
+    final signR = sz / 2 - (widget.vedic ? 46.0 : 32.0); // matches painter ring
     return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
-      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart)),
+      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart, vedic: widget.vedic)),
       // Sign symbol icons around the ring (Western zodiac / Vedic rashi).
       ...List.generate(12, (i) {
         final a = (180 + (i * 30.0 + 15 - chart.asc)) * _d2r;
@@ -1408,15 +1445,20 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         child: Center(child: FittedBox(fit: BoxFit.scaleDown,
           child: _boxHouse(h, signIdx, here)))));
     }
-    // Ascendant / Lagna pill (like the website), centred near the bottom.
-    kids.add(Positioned(left: 0, right: 0, bottom: sz * 0.03,
+    // Ascendant / Lagna pill — placed in the house that currently holds the
+    // Ascendant, so it MOVES as the hours/days change (not fixed), like the site.
+    final ascHouse = ((chart.ascSign - h1) % 12 + 12) % 12 + 1;
+    final acx = _houseC[ascHouse - 1][0] * sz, acy = _houseC[ascHouse - 1][1] * sz;
+    kids.add(Positioned(
+      left: acx - 54, top: (acy - 46).clamp(0.0, sz - 20).toDouble(), width: 108,
       child: Center(child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(color: kBg,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: kGold, width: 1.3)),
         child: Text('$ascWord ${_fmtDeg(chart.asc)}',
-          style: const TextStyle(color: kGold, fontSize: 11.5,
+          maxLines: 1,
+          style: const TextStyle(color: kGold, fontSize: 10,
             fontWeight: FontWeight.w800))))));
     return Center(child: SizedBox(width: sz, height: sz,
       child: Stack(children: kids)));
