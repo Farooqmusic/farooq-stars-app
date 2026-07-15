@@ -1094,6 +1094,16 @@ class _WheelPainter extends CustomPainter {
     cv.drawCircle(Offset(c, c), rHouse,
       Paint()..style = PaintingStyle.stroke..strokeWidth = 1
         ..color = const Color(0x33c77dff));
+    // 360° graduated ring — tiny ticks on the inner edge for a subtle degree
+    // dial. Minor tick every 1°, a slightly longer/brighter one every 10°.
+    for (int d = 0; d < 360; d++) {
+      final bool major = d % 10 == 0;
+      final double len = major ? 5.0 : 2.5;
+      cv.drawLine(_pos(d.toDouble(), rIn - len, c), _pos(d.toDouble(), rIn, c),
+        Paint()
+          ..color = major ? const Color(0x66c77dff) : const Color(0x2bc77dff)
+          ..strokeWidth = major ? 1.0 : 0.6);
+    }
     for (int i = 0; i < 12; i++) {
       final bl = i * 30.0;
       cv.drawLine(_pos(bl, rIn, c), _pos(bl, rOut, c),
@@ -1145,24 +1155,32 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
   @override
   void dispose() { _timer?.cancel(); super.dispose(); }
 
-  Widget _planetChip(LiveBody b) => SizedBox(width: 30, height: 30,
-    child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
-      CachedNetworkImage(
-        imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
-        width: 26, height: 26, fit: BoxFit.contain,
-        errorWidget: (_, __, ___) => Container(
-          width: 22, height: 22,
-          decoration: BoxDecoration(
-            color: _livePlanetColor[b.key], shape: BoxShape.circle),
-          alignment: Alignment.center,
-          child: Text(b.key[0],
-            style: const TextStyle(color: Colors.white, fontSize: 12,
-              fontWeight: FontWeight.w800)))),
-      if (b.retro) Positioned(right: 0, top: 0, child: Container(
-        width: 9, height: 9,
-        decoration: BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle,
-          border: Border.all(color: kBg, width: 1)))),
-    ]));
+  Widget _planetChip(LiveBody b) {
+    // Uniform planet size on the wheel (close to the clean table look), with
+    // the Sun a touch bigger. Retrograde planets get a soft magenta glow
+    // behind the icon (retroglow.png), replacing the old small red dot.
+    final bool isSun = b.key == 'Sun';
+    final double icon = isSun ? 28 : 22;
+    final double glow = icon + 14;
+    return SizedBox(width: 40, height: 40,
+      child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: [
+        if (b.retro) CachedNetworkImage(
+          imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+          width: glow, height: glow, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox.shrink()),
+        CachedNetworkImage(
+          imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+          width: icon, height: icon, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => Container(
+            width: icon - 4, height: icon - 4,
+            decoration: BoxDecoration(
+              color: _livePlanetColor[b.key], shape: BoxShape.circle),
+            alignment: Alignment.center,
+            child: Text(b.key[0],
+              style: const TextStyle(color: Colors.white, fontSize: 12,
+                fontWeight: FontWeight.w800)))),
+      ]));
+  }
 
   Widget _wheel(LiveChart chart) => LayoutBuilder(builder: (_, box) {
     final sz = math.min(box.maxWidth, 360.0);
@@ -1182,7 +1200,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
     return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
       CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart)),
       ...placed.map((p) => Positioned(
-        left: p.pos.dx - 15, top: p.pos.dy - 15, child: _planetChip(p.body))),
+        left: p.pos.dx - 20, top: p.pos.dy - 20, child: _planetChip(p.body))),
     ])));
   });
 
