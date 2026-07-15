@@ -889,7 +889,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
         actions: [
           IconButton(icon: const Icon(Icons.open_in_new, color: kGold, size: 20),
             tooltip: 'Open in browser',
-            onPressed: () => openUrl(widget.url)),
+            onPressed: () => openUrl(kWebsite)),
         ],
         title: Text(widget.title,
           style: TextStyle(color: kGold, fontSize: 18,
@@ -1114,7 +1114,7 @@ class _WheelPainter extends CustomPainter {
       // whole-sign house number (house 1 = Ascendant's sign)
       final hn = ((i - chart.ascSign) % 12 + 12) % 12 + 1;
       _label(cv, '$hn', _pos(i * 30.0 + 15, rHouse - 11, c),
-        kMuted, 9.5, FontWeight.w700);
+        elementColor(signs[i].element), 9.5, FontWeight.w700);
     }
     // Axis cross — horizon (ASC–DESC) and meridian (MC–IC)
     final desc = _norm(chart.asc + 180), ic = _norm(chart.mc + 180);
@@ -1373,20 +1373,26 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         style: const TextStyle(color: kMuted, fontSize: 7.5,
           fontWeight: FontWeight.w700)),
     ]));
-  Widget _boxHouse(int signIdx, List<LiveBody> here) => Column(
+  Widget _boxHouse(int h, int signIdx, List<LiveBody> here) => Column(
     mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center,
     children: [
-      CachedNetworkImage(
-        imageUrl: signSymbolUrl(signIdx, vedic: widget.vedic),
-        width: 22, height: 22, fit: BoxFit.contain,
-        errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)),
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('$h', style: TextStyle(
+          color: elementColor(signs[signIdx].element),
+          fontSize: 11, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 3),
+        CachedNetworkImage(
+          imageUrl: signSymbolUrl(signIdx, vedic: widget.vedic),
+          width: 22, height: 22, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)),
+      ]),
       if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2),
         child: Wrap(spacing: 2, runSpacing: 1, alignment: WrapAlignment.center,
           children: here.map(_boxPlanet).toList())),
     ]);
   // House 1 = the tapped sign (_selSign) or, if none, the Ascendant's sign;
   // the rest settle around it (whole-sign houses).
-  Widget _box(LiveChart chart) => LayoutBuilder(builder: (_, box) {
+  Widget _box(LiveChart chart, String ascWord) => LayoutBuilder(builder: (_, box) {
     final sz = math.min(box.maxWidth, 360.0);
     final h1 = _selSign ?? chart.ascSign;
     final kids = <Widget>[
@@ -1400,8 +1406,18 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       kids.add(Positioned(
         left: cx - 44, top: cy - 36, width: 88, height: 72,
         child: Center(child: FittedBox(fit: BoxFit.scaleDown,
-          child: _boxHouse(signIdx, here)))));
+          child: _boxHouse(h, signIdx, here)))));
     }
+    // Ascendant / Lagna pill (like the website), centred near the bottom.
+    kids.add(Positioned(left: 0, right: 0, bottom: sz * 0.03,
+      child: Center(child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(color: kBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: kGold, width: 1.3)),
+        child: Text('$ascWord ${_fmtDeg(chart.asc)}',
+          style: const TextStyle(color: kGold, fontSize: 11.5,
+            fontWeight: FontWeight.w800))))));
     return Center(child: SizedBox(width: sz, height: sz,
       child: Stack(children: kids)));
   });
@@ -1468,7 +1484,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
                 _zodiacStrip(),
                 const SizedBox(height: 10),
               ],
-              _boxMode ? _box(chart) : _wheel(chart),
+              _boxMode ? _box(chart, ascWord) : _wheel(chart),
               const SizedBox(height: 8),
               // Bottom bar: Circle toggle (left) · date nav · Box toggle (right).
               Row(children: [
@@ -2135,7 +2151,7 @@ class _DailyReadingCardState extends State<DailyReadingCard> {
         FilledButton.icon(
           style: FilledButton.styleFrom(backgroundColor: kPrimary,
             padding: const EdgeInsets.symmetric(vertical: 12)),
-          onPressed: () => openUrl(url),
+          onPressed: () => openUrl(kWebsite),
           icon: const Icon(Icons.open_in_new, size: 18),
           label: Text(tr('readOnWebsite'),
             style: TextStyle(fontWeight: FontWeight.w700,
@@ -3048,9 +3064,7 @@ class _MatchTabState extends State<MatchTab> {
             Expanded(child: FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: kPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 12)),
-              onPressed: () => openUrl(useVedic.value
-                ? '$kWebsite/farooq-match-vedic.html'
-                : '$kWebsite/farooq-match-western.html'),
+              onPressed: () => openUrl(kWebsite),
               icon: const Icon(Icons.open_in_new, size: 18),
               label: Text(tr('readOnWebsite'),
                 style: TextStyle(fontFamily: urduFont,
