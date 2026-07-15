@@ -1264,13 +1264,61 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         child: Icon(ic, color: kGold, size: 22))));
   String _liveDateLabel(DateTime t) => '${t.day}/${t.month}/${t.year}';
 
+  // ±24-hour control — shifting by hours mainly sweeps the Ascendant/houses
+  // through the signs (planets barely move within a day).
+  int _hourOffset = 0;
+  // Selected sign in the top strip (kept for the Box view, later).
+  int? _selSign;
+  Widget _hourPill(String label, int dir) => Material(
+    color: kCard, borderRadius: BorderRadius.circular(20),
+    child: InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => setState(() =>
+        _hourOffset = (_hourOffset + dir).clamp(-24, 24).toInt()),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        child: Text(label, style: const TextStyle(color: kLight,
+          fontSize: 13, fontWeight: FontWeight.w800)))));
+  Widget _zodiacStrip() => SizedBox(height: 58,
+    child: ListView.builder(
+      scrollDirection: Axis.horizontal,
+      itemCount: 12,
+      itemBuilder: (_, k) {
+        final i = 11 - k; // Pisces … Aries, like the website strip
+        final sel = _selSign == i;
+        final name = signs[i].name[currentLang.value]
+          ?? signs[i].name[AppLang.en]!;
+        return GestureDetector(
+          onTap: () => setState(() => _selSign = sel ? null : i),
+          child: Container(
+            width: 56,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: sel ? kGold : Colors.transparent, width: 1.4)),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CachedNetworkImage(
+                  imageUrl: signSymbolUrl(i, vedic: widget.vedic),
+                  width: 26, height: 26, fit: BoxFit.contain,
+                  errorWidget: (_, __, ___) =>
+                    const SizedBox(width: 26, height: 26)),
+                const SizedBox(height: 2),
+                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: sel ? kGold : kMuted,
+                    fontSize: 9, fontWeight: FontWeight.w700)),
+              ])));
+      }));
+
   @override
   Widget build(BuildContext context) {
     final l = currentLang.value;
     final city = _pickCity();
     final lat = (city['lat'] as num).toDouble();
     final lonE = (city['lon'] as num).toDouble();
-    final baseTime = DateTime.now().add(Duration(days: _dayOffset));
+    final baseTime =
+      DateTime.now().add(Duration(days: _dayOffset, hours: _hourOffset));
     final chart = computeChart(baseTime.toUtc(), lat, lonE, widget.vedic);
     final ascWord = widget.vedic
       ? {AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}[l]!
@@ -1288,37 +1336,60 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
           backgroundColor: kBg, elevation: 0,
           iconTheme: const IconThemeData(color: kGold),
           title: Text(title, style: TextStyle(color: kGold, fontSize: 17,
-            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+            fontWeight: FontWeight.w800, fontFamily: urduFont)),
+          actions: [
+            Padding(padding: const EdgeInsets.only(right: 14),
+              child: Center(child: Text(
+                '${city['n']}  ${_flag(city['c'] as String)}',
+                style: const TextStyle(color: kMuted, fontSize: 12.5,
+                  fontWeight: FontWeight.w700)))),
+          ]),
         body: Center(child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 640),
           child: ListView(
             padding: EdgeInsets.fromLTRB(16, 12, 16,
               28 + MediaQuery.of(context).viewPadding.bottom),
             children: [
-              // Wheel with ±day time-travel arrows at the bottom corners.
-              Stack(alignment: Alignment.bottomCenter, children: [
-                _wheel(chart),
-                Positioned(left: 0, bottom: 0,
-                  child: _dayArrow(Icons.chevron_left, -1)),
-                Positioned(right: 0, bottom: 0,
-                  child: _dayArrow(Icons.chevron_right, 1)),
+              // TOP: Ascendant ±24-hour control. Tapping the time resets it.
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                _hourPill('−1h', -1),
+                const SizedBox(width: 14),
+                GestureDetector(
+                  onTap: _hourOffset == 0
+                    ? null : () => setState(() => _hourOffset = 0),
+                  child: Text(
+                    '$ascWord  ${baseTime.hour.toString().padLeft(2, '0')}:${baseTime.minute.toString().padLeft(2, '0')}${_hourOffset == 0 ? '' : '  ⟲'}',
+                    style: TextStyle(
+                      color: _hourOffset == 0 ? kMuted : kLight,
+                      fontSize: 12.5, fontWeight: FontWeight.w800,
+                      fontFamily: urduFont))),
+                const SizedBox(width: 14),
+                _hourPill('+1h', 1),
               ]),
-              const SizedBox(height: 6),
-              Center(child: GestureDetector(
-                onTap: _dayOffset == 0
-                  ? null : () => setState(() => _dayOffset = 0),
-                child: Text(
-                  _dayOffset == 0
-                    ? _liveDateLabel(baseTime)
-                    : '${_liveDateLabel(baseTime)}   ·   ${tr('today')} ⟲',
-                  style: TextStyle(
-                    color: _dayOffset == 0 ? kMuted : kGold,
-                    fontSize: 12.5, fontWeight: FontWeight.w700,
-                    fontFamily: urduFont)))),
+              const SizedBox(height: 10),
+              // 12 zodiac signs — tap to select (drives the Box view later).
+              _zodiacStrip(),
+              const SizedBox(height: 10),
+              _wheel(chart),
               const SizedBox(height: 8),
-              Center(child: Text('${city['n']}  ${_flag(city['c'] as String)}',
-                style: const TextStyle(color: kMuted, fontSize: 12.5,
-                  fontWeight: FontWeight.w600))),
+              // Date + ±90-day arrows, moved below the wheel.
+              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                _dayArrow(Icons.chevron_left, -1),
+                const SizedBox(width: 16),
+                GestureDetector(
+                  onTap: _dayOffset == 0
+                    ? null : () => setState(() => _dayOffset = 0),
+                  child: Text(
+                    _dayOffset == 0
+                      ? _liveDateLabel(baseTime)
+                      : '${_liveDateLabel(baseTime)}  ⟲',
+                    style: TextStyle(
+                      color: _dayOffset == 0 ? kMuted : kGold,
+                      fontSize: 13, fontWeight: FontWeight.w800,
+                      fontFamily: urduFont))),
+                const SizedBox(width: 16),
+                _dayArrow(Icons.chevron_right, 1),
+              ]),
               const SizedBox(height: 14),
               card(child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch, children: [
