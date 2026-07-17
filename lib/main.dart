@@ -5178,10 +5178,11 @@ class _MatchTabState extends State<MatchTab> {
   Widget _slot(String label, int? idx, VoidCallback tap) => Expanded(
     child: GestureDetector(onTap: tap, child: Container(
       padding: const EdgeInsets.symmetric(vertical: 18),
-      decoration: BoxDecoration(color: kCard,
+      decoration: BoxDecoration(
+        color: idx != null ? kGold.withOpacity(0.10) : kCard,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: idx != null ? kPrimary : kBorder, width: 1.4)),
+          color: idx != null ? kGold : kBorder, width: 1.6)),
       child: Column(children: [
         idx != null
           ? SignIcon(idx, size: 46)
@@ -5189,27 +5190,217 @@ class _MatchTabState extends State<MatchTab> {
               style: TextStyle(fontSize: 40, color: kMuted)),
         const SizedBox(height: 6),
         Text(idx != null ? signName(signs[idx]) : label,
-          style: TextStyle(color: idx != null ? kOn : kMuted,
-            fontSize: 13.5, fontWeight: FontWeight.w700,
+          style: TextStyle(color: idx != null ? kGold : kMuted,
+            fontSize: 13.5, fontWeight: FontWeight.w800,
             fontFamily: urduFont)),
       ]))));
 
-  @override
   Widget _modePill(String key, String label) {
     final sel = _mode == key;
+    // Western modes (general + western) → gold; Vedic → purple.
+    final acc = key == 'vedic' ? kPrimary : kGold;
+    final txt = sel ? (key == 'vedic' ? Colors.white : kBg) : kMuted;
     return Expanded(child: GestureDetector(
       onTap: () => setState(() => _mode = key),
       child: AnimatedContainer(duration: const Duration(milliseconds: 180),
         margin: const EdgeInsets.symmetric(horizontal: 3),
         padding: const EdgeInsets.symmetric(vertical: 10),
-        decoration: BoxDecoration(color: sel ? kPrimary : kCard,
+        decoration: BoxDecoration(color: sel ? acc : kCard,
           borderRadius: BorderRadius.circular(99),
-          border: Border.all(color: sel ? kPrimary : kBorder)),
+          border: Border.all(color: sel ? acc : kBorder)),
         child: Text(label, textAlign: TextAlign.center, maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: sel ? Colors.white : kMuted,
-            fontSize: 12.5, fontWeight: FontWeight.w700,
+          style: TextStyle(color: txt,
+            fontSize: 12.5, fontWeight: FontWeight.w800,
             fontFamily: urduFont)))));
+  }
+
+  // ---- Western General: shareable compatibility card (image) ----------------
+  Future<void> _shareMatchCard(int a, int b, AppLang l) async {
+    showDialog<void>(context: context, barrierDismissible: false,
+      builder: (_) => const Center(
+        child: CircularProgressIndicator(color: kGold)));
+    Uint8List? png;
+    try { png = await _buildMatchImage(a, b, l); } catch (_) {}
+    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+
+    final asp = _mAsp(a, b);
+    int s = 0;
+    for (final c in _mCats) s += _mPct(c.k, a, b, asp);
+    final tot = (s / _mCats.length).round();
+    final v = _mVerdOf(tot);
+    final aName = signs[a].name[l] ?? signs[a].name[AppLang.en]!;
+    final bName = signs[b].name[l] ?? signs[b].name[AppLang.en]!;
+    final text = '$aName  &  $bName — $tot% '
+      '${v.lbl[l] ?? v.lbl[AppLang.en]!} ✨\nFarooq Stars · $kWebsite';
+    try {
+      if (png != null) {
+        final f = File('${Directory.systemTemp.path}/farooq_match.png');
+        await f.writeAsBytes(png);
+        await Share.shareXFiles([XFile(f.path)], text: text);
+        return;
+      }
+    } catch (_) {/* fall through */}
+    await openUrl('https://wa.me/?text=${Uri.encodeComponent(text)}');
+  }
+
+  // Draw the compatibility card on a canvas (mirrors WesternGeneralCard).
+  Future<Uint8List?> _buildMatchImage(int a, int b, AppLang l) async {
+    const double w = 1080, h = 1350;
+    const Color acc = kGold;
+    final imgs = await Future.wait<ui.Image?>([
+      _loadUiImage(signBigArtUrl(a)),
+      _loadUiImage(signBigArtUrl(b)),
+      _loadUiImage(signSymbolUrl(a, vedic: false)),
+      _loadUiImage(signSymbolUrl(b, vedic: false)),
+    ]);
+    final artA = imgs[0], artB = imgs[1], symA = imgs[2], symB = imgs[3];
+
+    final rec = ui.PictureRecorder();
+    final c = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
+    final dir = rtl ? TextDirection.rtl : TextDirection.ltr;
+
+    void draw(ui.Image? im, Rect dst) {
+      if (im == null) return;
+      c.drawImageRect(im,
+        Rect.fromLTWH(0, 0, im.width.toDouble(), im.height.toDouble()),
+        dst, Paint()..filterQuality = FilterQuality.medium);
+    }
+    // Cover-fit an image into a destination rect (clipped).
+    void cover(ui.Image? im, Rect dst) {
+      if (im == null) return;
+      c.save();
+      c.clipRect(dst);
+      final sc = math.max(dst.width / im.width, dst.height / im.height);
+      final iw = im.width * sc, ih = im.height * sc;
+      draw(im, Rect.fromLTWH(dst.center.dx - iw / 2, dst.center.dy - ih / 2,
+        iw, ih));
+      c.restore();
+    }
+    double line(String s, double y, double size, Color col,
+        {FontWeight fw = FontWeight.w600, double cx = 540,
+         TextAlign align = TextAlign.center, double maxW = 900}) {
+      final tp = TextPainter(
+        text: TextSpan(text: s, style: TextStyle(color: col, fontSize: size,
+          fontWeight: fw, fontFamily: urduFont, height: 1.4)),
+        textDirection: dir, textAlign: align)
+        ..layout(maxWidth: maxW);
+      double x;
+      if (align == TextAlign.right) {
+        x = cx - tp.width;
+      } else if (align == TextAlign.left) {
+        x = cx;
+      } else {
+        x = cx - tp.width / 2;
+      }
+      tp.paint(c, Offset(x, y));
+      return tp.height;
+    }
+
+    // Background: sign A art on the left half, sign B on the right, dark veil.
+    if (artA != null || artB != null) {
+      cover(artA ?? artB, Rect.fromLTWH(0, 0, w / 2, h));
+      cover(artB ?? artA, Rect.fromLTWH(w / 2, 0, w / 2, h));
+      c.drawRect(Rect.fromLTWH(0, 0, w, h),
+        Paint()..color = const Color(0xD610081A));
+    } else {
+      c.drawRect(Rect.fromLTWH(0, 0, w, h), Paint()..color = kBg);
+    }
+    // Gold double frame.
+    c.drawRect(Rect.fromLTWH(30, 30, w - 60, h - 60),
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 5..color = acc);
+    c.drawRect(Rect.fromLTWH(46, 46, w - 92, h - 92),
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 2
+        ..color = const Color(0x80E0A73A));
+
+    double y = 68;
+    line('✦ FAROOQ STARS', y, 46, acc, fw: FontWeight.w800);
+    y += 64;
+    line(_t({AppLang.en: 'Compatibility · Western', AppLang.ur: 'مطابقت · مغربی', AppLang.hi: 'अनुकूलता · पश्चिमी', AppLang.ar: 'التوافق · غربي'}, l),
+      y, 26, const Color(0xFFCBBCE6));
+    y += 58;
+
+    // The two sign symbols with a heart between them.
+    const double sy = 300, ssz = 150;
+    draw(symA, Rect.fromCenter(center: const Offset(360, sy),
+      width: ssz, height: ssz));
+    draw(symB, Rect.fromCenter(center: const Offset(720, sy),
+      width: ssz, height: ssz));
+    line('❤', sy - 34, 60, const Color(0xFFff6b6b));
+    y = sy + ssz / 2 + 18;
+
+    final aName = signs[a].name[l] ?? signs[a].name[AppLang.en]!;
+    final bName = signs[b].name[l] ?? signs[b].name[AppLang.en]!;
+    line('$aName   &   $bName', y, 40, Colors.white, fw: FontWeight.w800);
+    y += 66;
+
+    // Engine values.
+    final asp = _mAsp(a, b);
+    int sum = 0;
+    final pcts = <int>[];
+    for (final cat in _mCats) {
+      final p = _mPct(cat.k, a, b, asp);
+      pcts.add(p);
+      sum += p;
+    }
+    final tot = (sum / _mCats.length).round();
+    final v = _mVerdOf(tot);
+    final tier = _mTier(v.c);
+
+    // Total % pill + verdict pill.
+    final totRR = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w / 2 - 250, y, 210, 74), const Radius.circular(16));
+    c.drawRRect(totRR, Paint()..color = tier.withOpacity(0.16));
+    c.drawRRect(totRR, Paint()..style = PaintingStyle.stroke..strokeWidth = 2.5
+      ..color = tier.withOpacity(0.6));
+    line('$tot%', y + 16, 40, tier, fw: FontWeight.w900, cx: w / 2 - 145);
+    final vRR = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w / 2 - 20, y + 6, 280, 62), const Radius.circular(99));
+    c.drawRRect(vRR, Paint()..color = tier.withOpacity(0.14));
+    c.drawRRect(vRR, Paint()..style = PaintingStyle.stroke..strokeWidth = 2
+      ..color = tier.withOpacity(0.5));
+    line(v.lbl[l] ?? v.lbl[AppLang.en]!, y + 24, 26, tier,
+      fw: FontWeight.w800, cx: w / 2 + 120, maxW: 260);
+    y += 110;
+
+    // Six dimension bars.
+    const double barL = 96, barR = w - 96;
+    for (int i = 0; i < _mCats.length; i++) {
+      final cat = _mCats[i];
+      final p = pcts[i];
+      final col = _mBarCol(p);
+      final label = '${cat.ic} ${cat.lbl[l] ?? cat.lbl[AppLang.en]!}';
+      line(label, y, 27, const Color(0xFFEFE7F5), fw: FontWeight.w700,
+        cx: barL, align: TextAlign.left, maxW: 640);
+      line('$p%', y, 27, col, fw: FontWeight.w800,
+        cx: barR, align: TextAlign.right, maxW: 120);
+      final ty = y + 40;
+      final track = RRect.fromRectAndRadius(
+        Rect.fromLTWH(barL, ty, barR - barL, 12), const Radius.circular(99));
+      c.drawRRect(track, Paint()..color = const Color(0xFF2A1B34));
+      final fill = RRect.fromRectAndRadius(
+        Rect.fromLTWH(barL, ty, (barR - barL) * (p / 100), 12),
+        const Radius.circular(99));
+      c.drawRRect(fill, Paint()..color = col);
+      y += 74;
+    }
+
+    // Summary text.
+    y += 6;
+    final summary = (_mSum[asp][l] ?? _mSum[asp][AppLang.en]!)
+      .replaceAll('{A}', aName).replaceAll('{B}', bName);
+    line(summary, y, 25, const Color(0xFFD8CBEC), fw: FontWeight.w500,
+      cx: w / 2, maxW: w - 200);
+
+    // Footer.
+    line('✦ ${_t({AppLang.en: 'For curiosity & fun', AppLang.ur: 'محض دلچسپی و تفریح کے لیے', AppLang.hi: 'जिज्ञासा व मनोरंजन हेतु', AppLang.ar: 'للفضول والمتعة'}, l)}',
+      h - 100, 26, const Color(0xFFB9A6E6));
+    line('farooqstars.com', h - 60, 38, acc, fw: FontWeight.w800);
+
+    final pic = rec.endRecording();
+    final img = await pic.toImage(w.toInt(), h.toInt());
+    final bd = await img.toByteData(format: ui.ImageByteFormat.png);
+    return bd?.buffer.asUint8List();
   }
 
   Widget _comingSoon(AppLang l, bool vedic) => card(child: Column(children: [
@@ -5262,25 +5453,17 @@ class _MatchTabState extends State<MatchTab> {
             Row(children: [
               _slot(tr('firstSign'), _a, () => _pick(true)),
               const Padding(padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text('♥', style: TextStyle(color: kPrimary, fontSize: 26))),
+                child: Text('♥', style: TextStyle(color: kGold, fontSize: 26))),
               _slot(tr('secondSign'), _b, () => _pick(false)),
             ]),
             const SizedBox(height: 18),
             if (ready) WesternGeneralCard(a: _a!, b: _b!, l: l),
             if (ready) Padding(padding: const EdgeInsets.only(top: 4),
               child: OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(foregroundColor: kLight,
-                  side: const BorderSide(color: kBorder),
+                style: OutlinedButton.styleFrom(foregroundColor: kGold,
+                  side: BorderSide(color: kGold.withOpacity(0.6)),
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11)),
-                onPressed: () {
-                  final asp = _mAsp(_a!, _b!);
-                  int s = 0;
-                  for (final c in _mCats) s += _mPct(c.k, _a!, _b!, asp);
-                  final tot = (s / _mCats.length).round();
-                  final v = _mVerdOf(tot);
-                  Share.share('${signName(signs[_a!])} & ${signName(signs[_b!])} — '
-                    '$tot% ${v.lbl[l] ?? v.lbl[AppLang.en]!} ✨\nFarooq Stars · $kWebsite');
-                },
+                onPressed: () => _shareMatchCard(_a!, _b!, l),
                 icon: const Icon(Icons.share, size: 18),
                 label: Text(tr('share'), style: TextStyle(fontFamily: urduFont)))),
           ] else
