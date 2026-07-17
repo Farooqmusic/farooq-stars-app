@@ -21,6 +21,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -43,6 +45,9 @@ const kPlateBorder = Color(0xFF6b5a8a);
 const kAccentW = Color(0xFFe0a73a); // Western gold accent
 const kAccentV = Color(0xFF9a6fe0); // Vedic purple accent
 Color accentColor(bool vedic) => vedic ? kAccentV : kAccentW;
+// Nakshatra ring text on the Vedic wheel — sky-blue, matching the website
+// (farooq-now-vedic SVG fill:#7cc0f0).
+const kNak = Color(0xFF7cc0f0);
 
 // ---- Backend (same Supabase project as farooqstars.com) ----
 const kSupabaseUrl = 'https://yxrntgugocmhphkoibnp.supabase.co';
@@ -77,6 +82,7 @@ late SharedPreferences prefs;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  tzdata.initializeTimeZones(); // IANA tz db for DST-correct birth times
   prefs = await SharedPreferences.getInstance();
   // Restore saved choices
   final l = prefs.getString('lang');
@@ -1157,7 +1163,7 @@ class _WheelPainter extends CustomPainter {
         if (rot < -math.pi / 2) rot += math.pi;
         final tp = TextPainter(
           text: TextSpan(text: _nakshatras[n],
-            style: const TextStyle(color: kMuted, fontSize: 7,
+            style: const TextStyle(color: kNak, fontSize: 7,
               fontWeight: FontWeight.w600)),
           textDirection: TextDirection.ltr)..layout();
         cv.save();
@@ -2914,6 +2920,123 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
 }
 
 // ===========================================================================
+// Worldwide city search — Open-Meteo geocoding (same API the website uses).
+// Returns the picked result map {name, country_code, latitude, longitude,
+// timezone (IANA), admin1, country} via Navigator.pop.
+// ===========================================================================
+class CitySearchSheet extends StatefulWidget {
+  const CitySearchSheet({super.key});
+  @override
+  State<CitySearchSheet> createState() => _CitySearchSheetState();
+}
+
+class _CitySearchSheetState extends State<CitySearchSheet> {
+  final _ctrl = TextEditingController();
+  Timer? _deb;
+  List<Map<String, dynamic>> _res = [];
+  bool _loading = false;
+  String _msg = '';
+
+  void _onChanged(String q) {
+    _deb?.cancel();
+    final s = q.trim();
+    if (s.length < 2) { setState(() { _res = []; _msg = ''; }); return; }
+    _deb = Timer(const Duration(milliseconds: 320), () => _search(s));
+  }
+
+  Future<void> _search(String q) async {
+    setState(() { _loading = true; _msg = ''; });
+    try {
+      final r = await http.get(Uri.parse(
+        'https://geocoding-api.open-meteo.com/v1/search'
+        '?name=${Uri.encodeQueryComponent(q)}&count=10&language=en&format=json'))
+        .timeout(const Duration(seconds: 12));
+      final d = jsonDecode(r.body) as Map<String, dynamic>;
+      final res = ((d['results'] as List?) ?? const [])
+        .cast<Map<String, dynamic>>();
+      if (!mounted) return;
+      setState(() {
+        _res = res; _loading = false;
+        _msg = res.isEmpty ? 'noCity' : '';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() { _loading = false; _msg = 'failCity'; });
+    }
+  }
+
+  @override
+  void dispose() { _deb?.cancel(); _ctrl.dispose(); super.dispose(); }
+
+  String _t(Map<AppLang, String> m) => m[currentLang.value] ?? m[AppLang.en]!;
+
+  @override
+  Widget build(BuildContext context) {
+    final msgText = _msg == 'noCity'
+      ? _t({AppLang.en: 'No match — try another spelling.',
+          AppLang.ur: 'کوئی نتیجہ نہیں — دوسری ہجے آزمائیں۔',
+          AppLang.hi: 'कोई मेल नहीं — दूसरी वर्तनी आज़माएँ।',
+          AppLang.ar: 'لا نتيجة — جرّب تهجئة أخرى.'})
+      : _msg == 'failCity'
+        ? _t({AppLang.en: 'Search failed — check your connection.',
+            AppLang.ur: 'تلاش ناکام — اپنا کنکشن دیکھیں۔',
+            AppLang.hi: 'खोज विफल — कनेक्शन जाँचें।',
+            AppLang.ar: 'فشل البحث — تحقق من اتصالك.'})
+        : '';
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: SafeArea(child: SizedBox(
+        height: MediaQuery.of(context).size.height * 0.72,
+        child: Column(children: [
+          Container(width: 40, height: 4, margin: const EdgeInsets.only(top: 10),
+            decoration: BoxDecoration(color: kBorder,
+              borderRadius: BorderRadius.circular(2))),
+          Padding(padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: TextField(
+              controller: _ctrl, autofocus: true, onChanged: _onChanged,
+              style: const TextStyle(color: kOn, fontSize: 15),
+              decoration: InputDecoration(
+                hintText: _t({AppLang.en: 'Search any city…',
+                  AppLang.ur: 'کوئی بھی شہر تلاش کریں…',
+                  AppLang.hi: 'कोई भी शहर खोजें…',
+                  AppLang.ar: 'ابحث عن أي مدينة…'}),
+                hintStyle: const TextStyle(color: kMuted),
+                prefixIcon: const Icon(Icons.search, color: kMuted),
+                isDense: true, filled: true, fillColor: kBg,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 14),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: kBorder)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: kPrimary))))),
+          if (_loading) const LinearProgressIndicator(
+            minHeight: 2, color: kPrimary, backgroundColor: kCard),
+          if (msgText.isNotEmpty) Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(msgText, textAlign: TextAlign.center,
+              style: const TextStyle(color: kMuted, fontSize: 13.5))),
+          Expanded(child: ListView.builder(
+            itemCount: _res.length,
+            itemBuilder: (_, i) {
+              final c = _res[i];
+              final sub = [c['admin1'], c['country']]
+                .where((x) => x != null && '$x'.isNotEmpty).join(', ');
+              return ListTile(
+                leading: Text(_flag((c['country_code'] ?? '') as String? ?? ''),
+                  style: const TextStyle(fontSize: 22)),
+                title: Text('${c['name']}',
+                  style: const TextStyle(color: kOn, fontWeight: FontWeight.w700)),
+                subtitle: Text(sub,
+                  style: const TextStyle(color: kMuted, fontSize: 12)),
+                onTap: () => Navigator.pop(context, c));
+            })),
+        ]))));
+  }
+}
+
+// ===========================================================================
 // BIRTH CHART tab — the user's own natal chart (Western + Vedic). Replaces the
 // old duplicate Zodiac grid. v1: one saved birth profile (date/time/place) →
 // box + round natal chart (via NatalChartView) + planet positions table with
@@ -2930,8 +3053,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
   bool _set = false;       // a birth profile has been saved
   bool _editing = false;   // showing the entry form
   String _name = '';
-  int _y = 0, _mo = 0, _d = 0, _hh = 0, _mi = 0, _cityIdx = 0;
-  bool _datePicked = false, _timePicked = false;
+  int _y = 0, _mo = 0, _d = 0, _hh = 0, _mi = 0;
+  // Birthplace — worldwide (Open-Meteo geocoding + IANA timezone).
+  double _lat = 25.29, _lon = 51.53;
+  String _tzName = 'Asia/Qatar', _cityName = 'Doha', _cc = 'QA';
+  bool _datePicked = false, _timePicked = false, _placePicked = false;
   bool _boxMode = false;   // circle (false) / box (true)
   final _nameCtrl = TextEditingController();
 
@@ -2945,9 +3071,14 @@ class _BirthChartTabState extends State<BirthChartTab> {
     _d = prefs.getInt('bD') ?? 0;
     _hh = prefs.getInt('bH') ?? 0;
     _mi = prefs.getInt('bMi') ?? 0;
-    _cityIdx = prefs.getInt('bCity') ?? 0;
+    _lat = prefs.getDouble('bLat') ?? 25.29;
+    _lon = prefs.getDouble('bLon') ?? 51.53;
+    _tzName = prefs.getString('bTz') ?? 'Asia/Qatar';
+    _cityName = prefs.getString('bCityName') ?? 'Doha';
+    _cc = prefs.getString('bCC') ?? 'QA';
     _datePicked = _y > 0 && _mo > 0 && _d > 0;
     _timePicked = prefs.getBool('bTimeSet') ?? false;
+    _placePicked = prefs.getString('bTz') != null;
     _nameCtrl.text = _name;
     _editing = !_set;
   }
@@ -2959,14 +3090,17 @@ class _BirthChartTabState extends State<BirthChartTab> {
 
   // ---- birth moment → chart -------------------------------------------------
   LiveChart _compute(bool vedic) {
-    final city = _cities[_cityIdx];
-    final tz = (city['tz'] as num).toDouble();
-    final lat = (city['lat'] as num).toDouble();
-    final lonE = (city['lon'] as num).toDouble();
-    // Birth wall-clock is local to the birth city; convert to real UTC.
-    final utc = DateTime.utc(_y, _mo, _d, _hh, _mi)
-      .subtract(Duration(minutes: (tz * 60).round()));
-    return computeChart(utc, lat, lonE, vedic);
+    // Birth wall-clock is local to the birth city. Use the IANA timezone (DST-
+    // aware) to convert to real UTC; fall back to treating it as UTC if the
+    // zone name is somehow unknown.
+    DateTime utc;
+    try {
+      final loc = tz.getLocation(_tzName);
+      utc = tz.TZDateTime(loc, _y, _mo, _d, _hh, _mi).toUtc();
+    } catch (_) {
+      utc = DateTime.utc(_y, _mo, _d, _hh, _mi);
+    }
+    return computeChart(utc, _lat, _lon, vedic);
   }
 
   String _nak(double lon) =>
@@ -2975,10 +3109,8 @@ class _BirthChartTabState extends State<BirthChartTab> {
     '${_d.toString().padLeft(2, '0')}/${_mo.toString().padLeft(2, '0')}/$_y';
   String _timeStr() =>
     '${_hh.toString().padLeft(2, '0')}:${_mi.toString().padLeft(2, '0')}';
-  String _birthLine() {
-    final c = _cities[_cityIdx];
-    return '${_dateStr()}  ·  ${_timeStr()}  ·  ${c['n']} ${_flag(c['c'] as String)}';
-  }
+  String _birthLine() =>
+    '${_dateStr()}  ·  ${_timeStr()}  ·  $_cityName ${_flag(_cc)}';
 
   // ---- pickers --------------------------------------------------------------
   ThemeData _pickerTheme(BuildContext ctx) => Theme.of(ctx).copyWith(
@@ -3008,28 +3140,22 @@ class _BirthChartTabState extends State<BirthChartTab> {
     }
   }
 
-  void _pickCity() => showModalBottomSheet(
-    context: context, backgroundColor: kCard, isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (_) => SafeArea(child: SizedBox(height: 440,
-      child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        itemCount: _cities.length,
-        itemBuilder: (_, i) {
-          final c = _cities[i];
-          return ListTile(
-            leading: Text(_flag(c['c'] as String),
-              style: const TextStyle(fontSize: 22)),
-            title: Text('${c['n']}',
-              style: const TextStyle(color: kOn, fontWeight: FontWeight.w600)),
-            trailing: i == _cityIdx
-              ? const Icon(Icons.check, color: kGold) : null,
-            onTap: () {
-              setState(() => _cityIdx = i);
-              Navigator.pop(context);
-            });
-        }))));
+  Future<void> _pickCity() async {
+    final c = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context, backgroundColor: kCard, isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => const CitySearchSheet());
+    if (c == null) return;
+    setState(() {
+      _cityName = '${c['name']}';
+      _cc = (c['country_code'] as String?) ?? '';
+      _lat = (c['latitude'] as num).toDouble();
+      _lon = (c['longitude'] as num).toDouble();
+      _tzName = (c['timezone'] as String?) ?? 'UTC';
+      _placePicked = true;
+    });
+  }
 
   void _save() {
     _name = _nameCtrl.text.trim();
@@ -3041,7 +3167,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
     prefs.setInt('bD', _d);
     prefs.setInt('bH', _hh);
     prefs.setInt('bMi', _mi);
-    prefs.setInt('bCity', _cityIdx);
+    prefs.setDouble('bLat', _lat);
+    prefs.setDouble('bLon', _lon);
+    prefs.setString('bTz', _tzName);
+    prefs.setString('bCityName', _cityName);
+    prefs.setString('bCC', _cc);
     setState(() { _set = true; _editing = false; });
   }
 
@@ -3067,7 +3197,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
           ]))));
 
   Widget _form() {
-    final canShow = _datePicked && _timePicked;
+    final canShow = _datePicked && _timePicked && _placePicked;
     return ListView(
       padding: EdgeInsets.fromLTRB(18, 18, 18,
         28 + MediaQuery.of(context).viewPadding.bottom),
@@ -3120,7 +3250,10 @@ class _BirthChartTabState extends State<BirthChartTab> {
               Icons.access_time, _pickTime),
             _pickRow(_t({AppLang.en: 'Place', AppLang.ur: 'جگہ',
               AppLang.hi: 'स्थान', AppLang.ar: 'المكان'}),
-              '${_cities[_cityIdx]['n']} ${_flag(_cities[_cityIdx]['c'] as String)}',
+              _placePicked
+                ? '$_cityName ${_flag(_cc)}'
+                : _t({AppLang.en: 'Search', AppLang.ur: 'تلاش',
+                    AppLang.hi: 'खोजें', AppLang.ar: 'ابحث'}),
               Icons.place, _pickCity),
             const SizedBox(height: 18),
             SizedBox(width: double.infinity, child: ElevatedButton(
