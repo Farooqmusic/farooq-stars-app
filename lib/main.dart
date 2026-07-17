@@ -37,6 +37,12 @@ const kGold    = Color(0xFFf0c75e);
 // farooqstars.com Live-Sky pages (SVG disc fill #221436, box border #6b5a8a).
 const kPlate       = Color(0xFF221436);
 const kPlateBorder = Color(0xFF6b5a8a);
+// Per-system accent — Western = gold (sun), Vedic = purple (moon). Mirrors the
+// website's --violet variable: #e0a73a on farooq-western, #9a6fe0 on
+// farooq-vedic. Used to theme the Birth Chart screen by the chosen system.
+const kAccentW = Color(0xFFe0a73a); // Western gold accent
+const kAccentV = Color(0xFF9a6fe0); // Vedic purple accent
+Color accentColor(bool vedic) => vedic ? kAccentV : kAccentW;
 
 // ---- Backend (same Supabase project as farooqstars.com) ----
 const kSupabaseUrl = 'https://yxrntgugocmhphkoibnp.supabase.co';
@@ -1218,8 +1224,10 @@ class NatalChartView extends StatelessWidget {
   final bool boxMode;
   final int? selSign;    // box: sign that becomes House 1 (null = Ascendant's sign)
   final String ascWord;  // "Ascendant" / "Lagna" label for the box pill
+  final Color pillColor; // box ascendant-pill accent (gold for Live Sky)
   const NatalChartView({super.key, required this.chart, required this.vedic,
-    this.boxMode = false, this.selSign, this.ascWord = 'Asc'});
+    this.boxMode = false, this.selSign, this.ascWord = 'Asc',
+    this.pillColor = kGold});
 
   Widget _planetChip(LiveBody b) {
     // Uniform planet size on the wheel (Sun a touch bigger). Retrograde planets
@@ -1354,10 +1362,10 @@ class NatalChartView extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(color: kBg,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: kGold, width: 1.3)),
+          border: Border.all(color: pillColor, width: 1.3)),
         child: Text('$ascWord ${_fmtDeg(chart.asc)}',
           maxLines: 1,
-          style: const TextStyle(color: kGold, fontSize: 10,
+          style: TextStyle(color: pillColor, fontSize: 10,
             fontWeight: FontWeight.w800))))));
     return Center(child: SizedBox(width: sz, height: sz,
       child: Stack(children: kids)));
@@ -3047,7 +3055,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: kBorder)),
           child: Row(children: [
-            Icon(ic, color: kLight, size: 18),
+            Icon(ic, color: accentColor(useVedic.value), size: 18),
             const SizedBox(width: 12),
             Text(label, style: const TextStyle(color: kMuted,
               fontSize: 13.5, fontWeight: FontWeight.w600)),
@@ -3067,7 +3075,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
         Center(child: Text(_t({
           AppLang.en: 'Your Birth Chart', AppLang.ur: 'آپ کا پیدائشی چارٹ',
           AppLang.hi: 'आपकी जन्म कुंडली', AppLang.ar: 'خريطة ميلادك'}),
-          style: TextStyle(color: kGold, fontSize: 21,
+          style: TextStyle(color: accentColor(useVedic.value), fontSize: 21,
             fontWeight: FontWeight.w800, fontFamily: urduFont))),
         const SizedBox(height: 6),
         Center(child: Text(_t({
@@ -3097,7 +3105,8 @@ class _BirthChartTabState extends State<BirthChartTab> {
                   borderSide: const BorderSide(color: kBorder)),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: kPrimary)))),
+                  borderSide: BorderSide(
+                    color: accentColor(useVedic.value))))),
             const SizedBox(height: 10),
             _pickRow(_t({AppLang.en: 'Date', AppLang.ur: 'تاریخ',
               AppLang.hi: 'तिथि', AppLang.ar: 'التاريخ'}),
@@ -3117,7 +3126,8 @@ class _BirthChartTabState extends State<BirthChartTab> {
             SizedBox(width: double.infinity, child: ElevatedButton(
               onPressed: canShow ? _save : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: kPrimary, disabledBackgroundColor: kCard,
+                backgroundColor: accentColor(useVedic.value),
+                disabledBackgroundColor: kCard,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14))),
@@ -3125,7 +3135,10 @@ class _BirthChartTabState extends State<BirthChartTab> {
                 AppLang.ur: 'میرا چارٹ دکھائیں', AppLang.hi: 'मेरी कुंडली दिखाएँ',
                 AppLang.ar: 'اعرض خريطتي'}),
                 style: TextStyle(
-                  color: canShow ? Colors.white : kMuted, fontSize: 15,
+                  // gold button → dark text; purple button → white text.
+                  color: !canShow ? kMuted
+                    : (useVedic.value ? Colors.white : kBg),
+                  fontSize: 15,
                   fontWeight: FontWeight.w800, fontFamily: urduFont)))),
             if (_set) Center(child: TextButton(
               onPressed: () => setState(() => _editing = false),
@@ -3140,13 +3153,14 @@ class _BirthChartTabState extends State<BirthChartTab> {
   // ---- chart view widgets ---------------------------------------------------
   Widget _viewToggle(bool box, IconData ic) {
     final active = _boxMode == box;
+    final acc = accentColor(useVedic.value);
     return Material(
-      color: active ? kGold : kCard, shape: const CircleBorder(),
+      color: active ? acc : kCard, shape: const CircleBorder(),
       child: InkWell(
         customBorder: const CircleBorder(),
         onTap: () => setState(() => _boxMode = box),
         child: Padding(padding: const EdgeInsets.all(9),
-          child: Icon(ic, color: active ? kBg : kLight, size: 22))));
+          child: Icon(ic, color: active ? kBg : acc, size: 22))));
   }
 
   Widget _planetRow(LiveBody b, bool vedic, AppLang l) {
@@ -3173,14 +3187,14 @@ class _BirthChartTabState extends State<BirthChartTab> {
             fontWeight: FontWeight.w600, fontFamily: urduFont))),
         if (vedic) Expanded(flex: 3, child: Text(_nak(b.lon),
           maxLines: 1, overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: kLight, fontSize: 11.5,
+          style: TextStyle(color: accentColor(vedic), fontSize: 11.5,
             fontWeight: FontWeight.w600))),
         if (b.retro) const Padding(
           padding: EdgeInsets.symmetric(horizontal: 4),
           child: Text('R', style: TextStyle(color: Colors.redAccent,
             fontSize: 11, fontWeight: FontWeight.w800))),
         SizedBox(width: 30, child: Text('H${b.house}', textAlign: TextAlign.end,
-          style: const TextStyle(color: kLight, fontSize: 12,
+          style: TextStyle(color: accentColor(vedic), fontSize: 12,
             fontWeight: FontWeight.w700))),
       ]));
   }
@@ -3208,13 +3222,14 @@ class _BirthChartTabState extends State<BirthChartTab> {
                       AppLang.ur: 'پیدائشی چارٹ', AppLang.hi: 'जन्म कुंडली',
                       AppLang.ar: 'خريطة الميلاد'})
                   : _name,
-                style: TextStyle(color: kGold, fontSize: 17,
+                style: TextStyle(color: accentColor(vedic), fontSize: 17,
                   fontWeight: FontWeight.w800, fontFamily: urduFont))),
               InkWell(
                 onTap: () => setState(() => _editing = true),
                 borderRadius: BorderRadius.circular(20),
-                child: const Padding(padding: EdgeInsets.all(4),
-                  child: Icon(Icons.edit, color: kLight, size: 18))),
+                child: Padding(padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.edit,
+                    color: accentColor(vedic), size: 18))),
             ]),
             const SizedBox(height: 4),
             Text(_birthLine(),
@@ -3228,15 +3243,16 @@ class _BirthChartTabState extends State<BirthChartTab> {
         ]),
         const SizedBox(height: 10),
         NatalChartView(chart: chart, vedic: vedic,
-          boxMode: _boxMode, ascWord: ascWord),
+          boxMode: _boxMode, ascWord: ascWord,
+          pillColor: accentColor(vedic)),
         const SizedBox(height: 14),
         card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(children: [
-              const Icon(Icons.arrow_upward, color: kGold, size: 18),
+              Icon(Icons.arrow_upward, color: accentColor(vedic), size: 18),
               const SizedBox(width: 6),
               Text('$ascWord: ',
-                style: TextStyle(color: kGold, fontSize: 14.5,
+                style: TextStyle(color: accentColor(vedic), fontSize: 14.5,
                   fontWeight: FontWeight.w800, fontFamily: urduFont)),
               Text('$ascSignName ${_fmtDeg(chart.asc)}',
                 style: const TextStyle(color: kOn, fontSize: 14.5,
