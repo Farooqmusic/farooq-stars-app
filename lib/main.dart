@@ -1095,7 +1095,8 @@ class _Placed {
 class _WheelPainter extends CustomPainter {
   final LiveChart chart;
   final bool vedic;
-  _WheelPainter(this.chart, {this.vedic = false});
+  final int? houseRefSign; // House 1 sign for numbering (null = Ascendant)
+  _WheelPainter(this.chart, {this.vedic = false, this.houseRefSign});
 
   Offset _pos(double lon, double r, double c) {
     final a = (180 + (lon - chart.asc)) * _d2r;
@@ -1142,7 +1143,8 @@ class _WheelPainter extends CustomPainter {
       // zsymbol*.png for Western, hzsymbol*.png for Vedic rashis), so the old
       // text abbreviations (Ari/Tau/…) are no longer painted here.
       // whole-sign house number (house 1 = Ascendant's sign)
-      final hn = ((i - chart.ascSign) % 12 + 12) % 12 + 1;
+      final h1s = houseRefSign ?? chart.ascSign;
+      final hn = ((i - h1s) % 12 + 12) % 12 + 1;
       _label(cv, '$hn', _pos(i * 30.0 + 15, rHouse - 11, c),
         elementColor(signs[i].element), 9.5, FontWeight.w700);
     }
@@ -1229,10 +1231,11 @@ class NatalChartView extends StatelessWidget {
   final bool vedic;
   final bool boxMode;
   final int? selSign;    // box: sign that becomes House 1 (null = Ascendant's sign)
+  final int? houseRefSign; // House-1 sign for numbering (Sun/Moon/Asc); overrides selSign
   final String ascWord;  // "Ascendant" / "Lagna" label for the box pill
   final Color pillColor; // box ascendant-pill accent (gold for Live Sky)
   const NatalChartView({super.key, required this.chart, required this.vedic,
-    this.boxMode = false, this.selSign, this.ascWord = 'Asc',
+    this.boxMode = false, this.selSign, this.houseRefSign, this.ascWord = 'Asc',
     this.pillColor = kGold});
 
   Widget _planetChip(LiveBody b) {
@@ -1282,7 +1285,8 @@ class NatalChartView extends StatelessWidget {
     }
     final signR = sz / 2 - (vedic ? 46.0 : 32.0); // matches painter ring
     return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
-      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart, vedic: vedic)),
+      CustomPaint(size: Size(sz, sz),
+        painter: _WheelPainter(chart, vedic: vedic, houseRefSign: houseRefSign)),
       // Sign symbol icons around the ring (Western zodiac / Vedic rashi).
       ...List.generate(12, (i) {
         final a = (180 + (i * 30.0 + 15 - chart.asc)) * _d2r;
@@ -1344,7 +1348,7 @@ class NatalChartView extends StatelessWidget {
   // the rest settle around it (whole-sign houses).
   Widget _box() => LayoutBuilder(builder: (_, box) {
     final sz = math.min(box.maxWidth, 360.0);
-    final h1 = selSign ?? chart.ascSign;
+    final h1 = houseRefSign ?? selSign ?? chart.ascSign;
     final kids = <Widget>[
       CustomPaint(size: Size(sz, sz), painter: _BoxPainter()),
     ];
@@ -3164,9 +3168,11 @@ class AiReadingButton extends StatefulWidget {
   final bool vedic;
   final AppLang l;
   final Color accent;
+  final int houseRefSign;
   final String birthSig;
   const AiReadingButton({super.key, required this.chart, required this.vedic,
-    required this.l, required this.accent, required this.birthSig});
+    required this.l, required this.accent, required this.houseRefSign,
+    required this.birthSig});
   @override
   State<AiReadingButton> createState() => _AiReadingButtonState();
 }
@@ -3195,8 +3201,9 @@ class _AiReadingButtonState extends State<AiReadingButton> {
       'moonSign': moon == null ? '' : en(moon.sign),
       'planets': _rGrahas.where(byKey.containsKey).map((k) {
         final b = byKey[k]!;
+        final house = ((b.sign - widget.houseRefSign) % 12 + 12) % 12 + 1;
         return {
-          'name': k, 'sign': en(b.sign), 'house': b.house,
+          'name': k, 'sign': en(b.sign), 'house': house,
           'dignity': _rDignity(k, b.sign), 'retro': b.retro,
         };
       }).toList(),
@@ -3277,10 +3284,13 @@ class BirthReadingSection extends StatelessWidget {
   final bool vedic;
   final AppLang l;
   final Color accent;
+  final int houseRefSign; // House-1 sign (Sun/Moon/Asc)
   final String birthSig;
   const BirthReadingSection({super.key, required this.chart,
     required this.vedic, required this.l, required this.accent,
-    required this.birthSig});
+    required this.houseRefSign, required this.birthSig});
+
+  int _house(int sign) => ((sign - houseRefSign) % 12 + 12) % 12 + 1;
 
   Widget _pImg(String key) => CachedNetworkImage(
     imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[key]}',
@@ -3329,7 +3339,7 @@ class BirthReadingSection extends StatelessWidget {
                     fontWeight: FontWeight.w800, fontFamily: urduFont)),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
-                    '${_rHouseLabel(l, b.house)} · ${_rHouse[b.house - 1][l]}',
+                    '${_rHouseLabel(l, _house(b.sign))} · ${_rHouse[_house(b.sign) - 1][l]}',
                     style: TextStyle(color: kMuted, fontSize: 11.5,
                       fontWeight: FontWeight.w600, fontFamily: urduFont))),
                 ]),
@@ -3345,7 +3355,7 @@ class BirthReadingSection extends StatelessWidget {
         }),
         const SizedBox(height: 6),
         AiReadingButton(chart: chart, vedic: vedic, l: l, accent: accent,
-          birthSig: birthSig),
+          houseRefSign: houseRefSign, birthSig: birthSig),
         const SizedBox(height: 10),
         Text(_rDisc[l]!, style: TextStyle(color: kMuted, fontSize: 11.5,
           fontStyle: FontStyle.italic, fontFamily: urduFont)),
@@ -3375,6 +3385,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
   String _tzName = 'Asia/Qatar', _cityName = 'Doha', _cc = 'QA';
   bool _datePicked = false, _timePicked = false, _placePicked = false;
   bool _boxMode = false;   // circle (false) / box (true)
+  // House reference — Western: 'sun'|'asc' (default Sun, like the website);
+  // Vedic: 'moon'|'asc' (default Ascendant/Lagna). Rearranges chart + table +
+  // reading when changed.
+  String _refW = 'sun';
+  String _refV = 'asc';
   final _nameCtrl = TextEditingController();
 
   @override
@@ -3612,8 +3627,9 @@ class _BirthChartTabState extends State<BirthChartTab> {
           child: Icon(ic, color: active ? kBg : acc, size: 22))));
   }
 
-  Widget _planetRow(LiveBody b, bool vedic, AppLang l) {
+  Widget _planetRow(LiveBody b, bool vedic, AppLang l, int refSign) {
     final sName = signs[b.sign].name[l] ?? signs[b.sign].name[AppLang.en]!;
+    final house = ((b.sign - refSign) % 12 + 12) % 12 + 1;
     return Padding(padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(children: [
         SizedBox(width: 28, height: 28, child: Stack(
@@ -3642,14 +3658,66 @@ class _BirthChartTabState extends State<BirthChartTab> {
           padding: EdgeInsets.symmetric(horizontal: 4),
           child: Text('R', style: TextStyle(color: Colors.redAccent,
             fontSize: 11, fontWeight: FontWeight.w800))),
-        SizedBox(width: 30, child: Text('H${b.house}', textAlign: TextAlign.end,
+        SizedBox(width: 30, child: Text('H$house', textAlign: TextAlign.end,
           style: TextStyle(color: accentColor(vedic), fontSize: 12,
             fontWeight: FontWeight.w700))),
       ]));
   }
 
+  // House-reference segmented control. Western: Sun / Asc. Vedic: Moon / Asc.
+  Widget _refHalf(String key, String? icon, String label, String cur,
+      Color acc, void Function(String) onSet) {
+    final sel = cur == key;
+    return Expanded(child: GestureDetector(onTap: () => onSet(key),
+      child: AnimatedContainer(duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: sel ? acc : Colors.transparent,
+          borderRadius: BorderRadius.circular(99)),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min, children: [
+            icon != null
+              ? CachedNetworkImage(
+                  imageUrl: '$kWebsite/app/planet-icons-v2/$icon',
+                  width: 16, height: 16, fit: BoxFit.contain,
+                  errorWidget: (_, __, ___) => const SizedBox(width: 16, height: 16))
+              : Icon(Icons.arrow_upward, size: 15, color: sel ? kBg : acc),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: sel ? kBg : kMuted,
+              fontWeight: FontWeight.w700, fontSize: 12.5,
+              fontFamily: urduFont)),
+          ]))));
+  }
+
+  Widget _refSeg(bool vedic, Color acc) {
+    final cur = vedic ? _refV : _refW;
+    void onSet(String k) =>
+      setState(() { if (vedic) { _refV = k; } else { _refW = k; } });
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 36),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(color: kCard,
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: kBorder)),
+      child: Row(children: [
+        _refHalf(vedic ? 'moon' : 'sun', vedic ? 'moon.png' : 'sun.png',
+          vedic
+            ? _t({AppLang.en: 'Moon', AppLang.ur: 'چاند', AppLang.hi: 'चंद्र', AppLang.ar: 'القمر'})
+            : _t({AppLang.en: 'Sun', AppLang.ur: 'سورج', AppLang.hi: 'सूर्य', AppLang.ar: 'الشمس'}),
+          cur, acc, onSet),
+        _refHalf('asc', null,
+          _t({AppLang.en: 'Asc', AppLang.ur: 'طالع', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}),
+          cur, acc, onSet),
+      ]));
+  }
+
   Widget _chartView(bool vedic, AppLang l) {
     final chart = _compute(vedic);
+    final byKey = {for (final b in chart.bodies) b.key: b};
+    // House reference sign — Western default Sun, Vedic default Ascendant.
+    final int refSign = vedic
+      ? (_refV == 'moon' ? (byKey['Moon']?.sign ?? chart.ascSign) : chart.ascSign)
+      : (_refW == 'sun' ? (byKey['Sun']?.sign ?? chart.ascSign) : chart.ascSign);
     final ascWord = vedic
       ? _t({AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न',
           AppLang.ar: 'الطالع'})
@@ -3691,8 +3759,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
           _viewToggle(true, Icons.crop_square),
         ]),
         const SizedBox(height: 10),
+        // Houses from Sun/Moon or Ascendant — rearranges everything below.
+        _refSeg(vedic, accentColor(vedic)),
+        const SizedBox(height: 10),
         NatalChartView(chart: chart, vedic: vedic,
-          boxMode: _boxMode, ascWord: ascWord,
+          boxMode: _boxMode, houseRefSign: refSign, ascWord: ascWord,
           pillColor: accentColor(vedic)),
         const SizedBox(height: 14),
         card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3708,12 +3779,12 @@ class _BirthChartTabState extends State<BirthChartTab> {
                   fontWeight: FontWeight.w700)),
             ]),
             const Divider(color: kBorder, height: 20),
-            ...chart.bodies.map((b) => _planetRow(b, vedic, l)),
+            ...chart.bodies.map((b) => _planetRow(b, vedic, l, refSign)),
           ])),
         // Detailed per-planet reading (Overall) + live Claude AI reading.
         BirthReadingSection(chart: chart, vedic: vedic, l: l,
-          accent: accentColor(vedic),
-          birthSig: '${_y}_${_mo}_${_d}_${_hh}_${_mi}_${_lat}_$_lon'),
+          accent: accentColor(vedic), houseRefSign: refSign,
+          birthSig: '${_y}_${_mo}_${_d}_${_hh}_${_mi}_${_lat}_${_lon}_$refSign'),
       ]);
   }
 
