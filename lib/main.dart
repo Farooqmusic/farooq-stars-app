@@ -13,6 +13,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -3500,6 +3502,28 @@ class _BirthReadingSectionState extends State<BirthReadingSection> {
   }
 }
 
+// North-Indian house-content centres (unit square), shared by the chart and
+// the shareable report card. index 0 = House 1 … 11 = House 12.
+const List<List<double>> _kHouseC = [
+  [0.50, 0.26], [0.26, 0.14], [0.14, 0.26], [0.28, 0.50],
+  [0.14, 0.74], [0.26, 0.86], [0.50, 0.74], [0.74, 0.86],
+  [0.86, 0.74], [0.72, 0.50], [0.86, 0.26], [0.74, 0.14],
+];
+
+// Fetch a network image as a dart:ui Image (for the shareable report canvas).
+Future<ui.Image?> _loadUiImage(String url) async {
+  try {
+    final r = await http.get(Uri.parse(url))
+      .timeout(const Duration(seconds: 20));
+    if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
+    final codec = await ui.instantiateImageCodec(r.bodyBytes);
+    final frame = await codec.getNextFrame();
+    return frame.image;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ===========================================================================
 // DIVISIONAL (VARGA) CHARTS — D1..D60, Vedic only. vargaSign() ported verbatim
 // from the website (Parashari rules), verified in Python. Each chart re-maps a
@@ -4155,10 +4179,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
     return '';
   }
 
-  // Share the reference sign's artwork (Sun/Moon/Ascendant, whichever is on)
-  // to WhatsApp / any app, with a short caption. Same pattern as the daily
-  // share: fetch the art → temp file → share sheet, with a wa.me text fallback.
-  Future<void> _shareChart(bool vedic, int refSign, AppLang l) async {
+  // Share a beautiful colour report card (like the website's) to WhatsApp /
+  // any app. Generates a 1080×1350 PNG on-device, falls back to the sign
+  // artwork, then to a wa.me text share.
+  Future<void> _shareChart(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
     final signName = signs[refSign].name[l] ?? signs[refSign].name[AppLang.en]!;
     final refMode = vedic ? _refV : _refW;
     final refLabel = refMode == 'asc'
@@ -4176,7 +4201,27 @@ class _BirthChartTabState extends State<BirthChartTab> {
       ..writeln('')
       ..writeln('📲 Farooq Stars: $kWebsite');
     final text = buf.toString();
+
+    // Loading spinner while we build the report image (several image fetches).
+    showDialog<void>(context: context, barrierDismissible: false,
+      builder: (_) => Center(child: CircularProgressIndicator(
+        color: accentColor(vedic))));
+    Uint8List? png;
     try {
+      png = await _buildReportImage(vedic, refSign, l, chart);
+    } catch (_) {
+      png = null;
+    }
+    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+
+    try {
+      if (png != null) {
+        final f = File('${Directory.systemTemp.path}/farooq_report.png');
+        await f.writeAsBytes(png);
+        await Share.shareXFiles([XFile(f.path)], text: text);
+        return;
+      }
+      // Fallback: the sign artwork on its own.
       final resp = await http.get(Uri.parse(signBigArtUrl(refSign)))
         .timeout(const Duration(seconds: 20));
       if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
@@ -4187,6 +4232,185 @@ class _BirthChartTabState extends State<BirthChartTab> {
       }
     } catch (_) {/* fall through to text-only */}
     await openUrl('https://wa.me/?text=${Uri.encodeComponent(text)}');
+  }
+
+  // Draw the shareable report card on a canvas (matches the website _rcPaint).
+  Future<Uint8List?> _buildReportImage(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
+    const double w = 1080, h = 1350;
+    final Color acc = accentColor(vedic);
+    final byK = {for (final b in chart.bodies) b.key: b};
+
+    // Fetch every image the card needs, in parallel.
+    final imgs = await Future.wait<ui.Image?>([
+      _loadUiImage(signBigArtUrl(refSign)),
+      _loadUiImage('$kWebsite/app/planet-icons-v2/retroglow.png'),
+      ..._rGrahas.map((k) =>
+        _loadUiImage('$kWebsite/app/planet-icons-v2/${_livePlanetIcon[k]}')),
+      ...List.generate(12, (i) => _loadUiImage(signSymbolUrl(i, vedic: vedic))),
+    ]);
+    final bgImg = imgs[0], glowImg = imgs[1];
+    final planetImgs = <String, ui.Image?>{};
+    for (int i = 0; i < _rGrahas.length; i++) {
+      planetImgs[_rGrahas[i]] = imgs[2 + i];
+    }
+    final signImgs = <int, ui.Image?>{};
+    for (int i = 0; i < 12; i++) {
+      signImgs[i] = imgs[2 + _rGrahas.length + i];
+    }
+
+    final rec = ui.PictureRecorder();
+    final c = Canvas(rec, Rect.fromLTWH(0, 0, w, h));
+
+    void draw(ui.Image? im, Rect dst) {
+      if (im == null) return;
+      c.drawImageRect(im,
+        Rect.fromLTWH(0, 0, im.width.toDouble(), im.height.toDouble()),
+        dst, Paint()..filterQuality = FilterQuality.medium);
+    }
+    void line(String s, double y, double size, Color col,
+        {FontWeight fw = FontWeight.w600, double cx = 540,
+         TextAlign align = TextAlign.center}) {
+      final tp = TextPainter(
+        text: TextSpan(text: s, style: TextStyle(color: col, fontSize: size,
+          fontWeight: fw, fontFamily: urduFont)),
+        textDirection: TextDirection.ltr, textAlign: align)
+        ..layout(maxWidth: w - 100);
+      double x;
+      if (align == TextAlign.right) {
+        x = cx - tp.width;
+      } else if (align == TextAlign.left) {
+        x = cx;
+      } else {
+        x = cx - tp.width / 2;
+      }
+      tp.paint(c, Offset(x, y));
+    }
+
+    // Background: the sign artwork (cover) + dark overlay, or plain bg.
+    if (bgImg != null) {
+      final sc = math.max(w / bgImg.width, h / bgImg.height);
+      final iw = bgImg.width * sc, ih = bgImg.height * sc;
+      draw(bgImg, Rect.fromLTWH((w - iw) / 2, (h - ih) / 2, iw, ih));
+      c.drawRect(Rect.fromLTWH(0, 0, w, h),
+        Paint()..color = const Color(0xCC10081A));
+    } else {
+      c.drawRect(Rect.fromLTWH(0, 0, w, h), Paint()..color = kBg);
+    }
+    c.drawRect(Rect.fromLTWH(30, 30, w - 60, h - 60),
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 5..color = acc);
+    c.drawRect(Rect.fromLTWH(46, 46, w - 92, h - 92),
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 2
+        ..color = const Color(0x809A6FE0));
+
+    double y = 66;
+    line('✦ FAROOQ STARS', y, 46, acc, fw: FontWeight.w800);
+    y += 66;
+    final sysN = vedic
+      ? _t({AppLang.en: 'Vedic', AppLang.ur: 'ویدک', AppLang.hi: 'वैदिक', AppLang.ar: 'فيدي'})
+      : _t({AppLang.en: 'Western', AppLang.ur: 'مغربی', AppLang.hi: 'पश्चिमी', AppLang.ar: 'غربي'});
+    final birthLbl = _t({AppLang.en: 'Birth chart', AppLang.ur: 'پیدائشی چارٹ', AppLang.hi: 'जन्म चार्ट', AppLang.ar: 'مخطط الميلاد'});
+    line('$sysN · $birthLbl', y, 26, const Color(0xFFCBBCE6));
+    y += 38;
+    line('${_dateStr()}   ${_timeStr()}   $_cityName ${_flag(_cc)}', y, 22,
+      const Color(0xFFA99BC6));
+    y += 34;
+    if (_name.isNotEmpty) {
+      line(_name, y, 38, Colors.white, fw: FontWeight.w800);
+      y += 52;
+    }
+    y += 8;
+
+    String sn(int i) => signs[i].name[l] ?? signs[i].name[AppLang.en]!;
+    String sd(double lon) => '${(lon % 30).floor()}°';
+    final sunB = byK['Sun'], moonB = byK['Moon'];
+    final boxData = <List<Object>>[
+      [_t({AppLang.en: 'Ascendant', AppLang.ur: 'لگن', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}), '${sn(chart.ascSign)} ${sd(chart.asc)}', const Color(0xFFC4A5F0)],
+      [_t({AppLang.en: 'Sun', AppLang.ur: 'سورج', AppLang.hi: 'सूर्य', AppLang.ar: 'الشمس'}), sunB == null ? '—' : '${sn(sunB.sign)} ${sd(sunB.lon)}', const Color(0xFFF0A93C)],
+      [_t({AppLang.en: 'Moon', AppLang.ur: 'چاند', AppLang.hi: 'चंद्र', AppLang.ar: 'القمر'}), moonB == null ? '—' : '${sn(moonB.sign)} ${sd(moonB.lon)}', const Color(0xFFCFD6E6)],
+    ];
+    const double bw = 300, gap = 20, bh = 104;
+    final double startX = w / 2 - (bw * 1.5 + gap);
+    for (int i = 0; i < 3; i++) {
+      final bx = startX + i * (bw + gap);
+      final rr = RRect.fromRectAndRadius(
+        Rect.fromLTWH(bx, y, bw, bh), const Radius.circular(14));
+      c.drawRRect(rr, Paint()..color = const Color(0x80140A1E));
+      c.drawRRect(rr, Paint()..style = PaintingStyle.stroke..strokeWidth = 2
+        ..color = acc.withOpacity(0.5));
+      line(boxData[i][0] as String, y + 24, 22, boxData[i][2] as Color,
+        fw: FontWeight.w800, cx: bx + bw / 2);
+      line(boxData[i][1] as String, y + 58, 26, Colors.white,
+        fw: FontWeight.w700, cx: bx + bw / 2);
+    }
+    y += bh + 26;
+
+    // North-Indian box chart.
+    const double cs = 500;
+    final double bx0 = w / 2 - cs / 2, by0 = y;
+    c.drawRRect(RRect.fromRectAndRadius(
+      Rect.fromLTWH(bx0 - 12, by0 - 12, cs + 24, cs + 24),
+      const Radius.circular(18)), Paint()..color = const Color(0xFF140A1E));
+    c.drawRect(Rect.fromLTWH(bx0, by0, cs, cs), Paint()..color = kPlate);
+    final frame = Paint()..style = PaintingStyle.stroke..strokeWidth = 2
+      ..color = const Color(0xFF4A3866);
+    c.drawRect(Rect.fromLTWH(bx0, by0, cs, cs), Paint()
+      ..style = PaintingStyle.stroke..strokeWidth = 2.4..color = kPlateBorder);
+    c.drawLine(Offset(bx0, by0), Offset(bx0 + cs, by0 + cs), frame);
+    c.drawLine(Offset(bx0 + cs, by0), Offset(bx0, by0 + cs), frame);
+    c.drawPath(Path()
+      ..moveTo(bx0 + cs / 2, by0)..lineTo(bx0 + cs, by0 + cs / 2)
+      ..lineTo(bx0 + cs / 2, by0 + cs)..lineTo(bx0, by0 + cs / 2)..close(),
+      frame);
+    final h1 = refSign;
+    for (int hh = 1; hh <= 12; hh++) {
+      final signIdx = (h1 + hh - 1) % 12;
+      final here = chart.bodies.where((b) => _rGrahas.contains(b.key) &&
+        ((b.sign - h1) % 12 + 12) % 12 + 1 == hh).toList();
+      final hx = bx0 + _kHouseC[hh - 1][0] * cs;
+      final hy = by0 + _kHouseC[hh - 1][1] * cs;
+      draw(signImgs[signIdx],
+        Rect.fromCenter(center: Offset(hx + 16, hy - 18), width: 34, height: 34));
+      line('$hh', hy - 34, 20, elementColor(signs[signIdx].element),
+        fw: FontWeight.w800, cx: hx - 16);
+      if (here.isNotEmpty) {
+        double px = hx - (here.length - 1) * 18;
+        for (final b in here) {
+          if (b.retro) {
+            draw(glowImg,
+              Rect.fromCenter(center: Offset(px, hy + 18), width: 42, height: 42));
+          }
+          draw(planetImgs[b.key],
+            Rect.fromCenter(center: Offset(px, hy + 18), width: 32, height: 32));
+          px += 36;
+        }
+      }
+    }
+    y += cs + 46;
+
+    // Planet list, two columns.
+    const double rowH = 56, colW = 460;
+    final double gx0 = w / 2 - colW;
+    for (int p = 0; p < _rGrahas.length; p++) {
+      final k = _rGrahas[p], b = byK[k];
+      if (b == null) continue;
+      final col = p % 2, row = p ~/ 2;
+      final px = gx0 + col * colW, py = y + row * rowH;
+      draw(planetImgs[k], Rect.fromLTWH(px, py, 32, 32));
+      line(_rPlanetName[k]![l]!, py + 4, 25, const Color(0xFFE7DFFB),
+        fw: FontWeight.w600, cx: px + 46, align: TextAlign.left);
+      line('${sn(b.sign)} ${sd(b.lon)}', py + 4, 24, const Color(0xFFCBBCE6),
+        fw: FontWeight.w600, cx: px + colW - 16, align: TextAlign.right);
+    }
+
+    line('✦ ${_t({AppLang.en: 'For curiosity & fun', AppLang.ur: 'محض دلچسپی و تفریح کے لیے', AppLang.hi: 'जिज्ञासा व मनोरंजन हेतु', AppLang.ar: 'للفضول والمتعة'})}',
+      h - 96, 26, const Color(0xFFB9A6E6));
+    line('farooqstars.com', h - 54, 38, acc, fw: FontWeight.w800);
+
+    final pic = rec.endRecording();
+    final img = await pic.toImage(w.toInt(), h.toInt());
+    final bd = await img.toByteData(format: ui.ImageByteFormat.png);
+    return bd?.buffer.asUint8List();
   }
 
   Widget _chartView(bool vedic, AppLang l) {
@@ -4220,7 +4444,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
                 style: TextStyle(color: accentColor(vedic), fontSize: 17,
                   fontWeight: FontWeight.w800, fontFamily: urduFont))),
               InkWell(
-                onTap: () => _shareChart(vedic, refSign, l),
+                onTap: () => _shareChart(vedic, refSign, l, chart),
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(padding: const EdgeInsets.all(4),
                   child: Icon(Icons.ios_share,
