@@ -33,6 +33,10 @@ const kOn      = Color(0xFFefe7f5);
 const kMuted   = Color(0xFFb39fc4);
 const kBorder  = Color(0x33c77dff);
 const kGold    = Color(0xFFf0c75e);
+// Chart plate — the purple disc/panel the wheel & box sit on. Matches the
+// farooqstars.com Live-Sky pages (SVG disc fill #221436, box border #6b5a8a).
+const kPlate       = Color(0xFF221436);
+const kPlateBorder = Color(0xFF6b5a8a);
 
 // ---- Backend (same Supabase project as farooqstars.com) ----
 const kSupabaseUrl = 'https://yxrntgugocmhphkoibnp.supabase.co';
@@ -110,6 +114,7 @@ String? get urduFont =>
 const Map<String, Map<AppLang, String>> _tr = {
   'today':      {AppLang.en: 'Today', AppLang.ur: 'آج', AppLang.hi: 'आज', AppLang.ar: 'اليوم'},
   'zodiac':     {AppLang.en: 'Zodiac', AppLang.ur: 'برج', AppLang.hi: 'राशियाँ', AppLang.ar: 'الأبراج'},
+  'birthTab':   {AppLang.en: 'Birth', AppLang.ur: 'پیدائش', AppLang.hi: 'जन्म', AppLang.ar: 'الميلاد'},
   'match':      {AppLang.en: 'Match', AppLang.ur: 'جوڑ', AppLang.hi: 'मिलान', AppLang.ar: 'التوافق'},
   'more':       {AppLang.en: 'More', AppLang.ur: 'مزید', AppLang.hi: 'और', AppLang.ar: 'المزيد'},
   'western':    {AppLang.en: 'Western', AppLang.ur: 'مغربی', AppLang.hi: 'पश्चिमी', AppLang.ar: 'غربي'},
@@ -498,7 +503,7 @@ class _RootShellState extends State<RootShell> {
           fontSize: 18, letterSpacing: 3)),
     ),
     body: IndexedStack(index: _tab, children: const [
-      LiveSkyTab(), TodayTab(), ZodiacTab(), MatchTab(), MoreTab(),
+      LiveSkyTab(), TodayTab(), BirthChartTab(), MatchTab(), MoreTab(),
     ]),
     bottomNavigationBar: NavigationBar(
       selectedIndex: _tab,
@@ -508,7 +513,7 @@ class _RootShellState extends State<RootShell> {
         // tab is now "Zodiac". The old sign grid stays for now (removed later).
         NavigationDestination(icon: const Icon(Icons.auto_awesome), label: tr('today')),
         NavigationDestination(icon: const Icon(Icons.brightness_7), label: tr('zodiac')),
-        NavigationDestination(icon: const Icon(Icons.brightness_3), label: tr('zodiac')),
+        NavigationDestination(icon: const Icon(Icons.pie_chart_outline), label: tr('birthTab')),
         NavigationDestination(icon: const Icon(Icons.favorite_outline), label: tr('match')),
         NavigationDestination(icon: const Icon(Icons.menu), label: tr('more')),
       ]),
@@ -1097,6 +1102,9 @@ class _WheelPainter extends CustomPainter {
     final c = size.width / 2;
     final rOut = size.width / 2 - (vedic ? 34.0 : 20.0), rIn = rOut - 24;
     final rHouse = rIn - 22;
+    // Purple chart plate behind the whole wheel — matches the website disc
+    // (SVG <circle fill="#221436">). Draw first so everything sits on top.
+    cv.drawCircle(Offset(c, c), c - 2, Paint()..color = kPlate);
     final ring = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
       ..color = const Color(0xFF4a3866);
     cv.drawCircle(Offset(c, c), rOut, ring);
@@ -1184,7 +1192,11 @@ class _BoxPainter extends CustomPainter {
     final s = size.width;
     final p = Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2
       ..color = const Color(0xFF4a3866);
-    cv.drawRect(Rect.fromLTWH(0, 0, s, s), p);
+    // Purple chart plate + brighter outer border — matches the website box
+    // (SVG <rect fill="#221436" stroke="#6b5a8a">).
+    cv.drawRect(Rect.fromLTWH(0, 0, s, s), Paint()..color = kPlate);
+    cv.drawRect(Rect.fromLTWH(0, 0, s, s), Paint()
+      ..style = PaintingStyle.stroke..strokeWidth = 1.4..color = kPlateBorder);
     cv.drawLine(const Offset(0, 0), Offset(s, s), p);
     cv.drawLine(Offset(s, 0), Offset(0, s), p);
     cv.drawPath(Path()
@@ -1195,28 +1207,23 @@ class _BoxPainter extends CustomPainter {
   bool shouldRepaint(_BoxPainter o) => false;
 }
 
-class LiveSkyScreen extends StatefulWidget {
+// ---------------------------------------------------------------------------
+// Reusable chart renderer — the round wheel and the North-Indian box, both
+// painted with _WheelPainter / _BoxPainter. Shared by the Live Sky (transit)
+// screen and the Birth Chart tab (natal), so the drawing lives in ONE place.
+// ---------------------------------------------------------------------------
+class NatalChartView extends StatelessWidget {
+  final LiveChart chart;
   final bool vedic;
-  const LiveSkyScreen({super.key, required this.vedic});
-  @override
-  State<LiveSkyScreen> createState() => _LiveSkyScreenState();
-}
-
-class _LiveSkyScreenState extends State<LiveSkyScreen> {
-  Timer? _timer;
-  @override
-  void initState() {
-    super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 60),
-      (_) { if (mounted) setState(() {}); });
-  }
-  @override
-  void dispose() { _timer?.cancel(); super.dispose(); }
+  final bool boxMode;
+  final int? selSign;    // box: sign that becomes House 1 (null = Ascendant's sign)
+  final String ascWord;  // "Ascendant" / "Lagna" label for the box pill
+  const NatalChartView({super.key, required this.chart, required this.vedic,
+    this.boxMode = false, this.selSign, this.ascWord = 'Asc'});
 
   Widget _planetChip(LiveBody b) {
-    // Uniform planet size on the wheel (close to the clean table look), with
-    // the Sun a touch bigger. Retrograde planets get a soft magenta glow
-    // behind the icon (retroglow.png), replacing the old small red dot.
+    // Uniform planet size on the wheel (Sun a touch bigger). Retrograde planets
+    // get a soft magenta glow behind the icon (retroglow.png).
     final bool isSun = b.key == 'Sun';
     final double icon = isSun ? 28 : 22;
     final double glow = icon + 14;
@@ -1237,7 +1244,6 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
             child: Text(b.key[0],
               style: const TextStyle(color: Colors.white, fontSize: 12,
                 fontWeight: FontWeight.w800)))),
-        // Degree within the sign (compact) under the planet.
         Positioned(bottom: 0, child: Text(
           '${(b.lon % 30).floor()}°',
           style: const TextStyle(color: kLight, fontSize: 8.5,
@@ -1245,7 +1251,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       ]));
   }
 
-  Widget _wheel(LiveChart chart) => LayoutBuilder(builder: (_, box) {
+  Widget _wheel() => LayoutBuilder(builder: (_, box) {
     final sz = math.min(box.maxWidth, 360.0);
     final c = sz / 2, rP = sz / 2 - 74;
     final radii = [rP, rP - 20, rP - 40];
@@ -1260,9 +1266,9 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
       final r = radii[ri];
       placed.add(_Placed(b, Offset(c + r * math.cos(a), c - r * math.sin(a))));
     }
-    final signR = sz / 2 - (widget.vedic ? 46.0 : 32.0); // matches painter ring
+    final signR = sz / 2 - (vedic ? 46.0 : 32.0); // matches painter ring
     return Center(child: SizedBox(width: sz, height: sz, child: Stack(children: [
-      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart, vedic: widget.vedic)),
+      CustomPaint(size: Size(sz, sz), painter: _WheelPainter(chart, vedic: vedic)),
       // Sign symbol icons around the ring (Western zodiac / Vedic rashi).
       ...List.generate(12, (i) {
         final a = (180 + (i * 30.0 + 15 - chart.asc)) * _d2r;
@@ -1270,7 +1276,7 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         return Positioned(
           left: pos.dx - 11, top: pos.dy - 11,
           child: CachedNetworkImage(
-            imageUrl: signSymbolUrl(i, vedic: widget.vedic),
+            imageUrl: signSymbolUrl(i, vedic: vedic),
             width: 22, height: 22, fit: BoxFit.contain,
             errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)));
       }),
@@ -1278,6 +1284,106 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
         left: p.pos.dx - 20, top: p.pos.dy - 22, child: _planetChip(p.body))),
     ])));
   });
+
+  // House-content centres for the North-Indian square (unit square, top-left
+  // origin), index 0 = House 1 … index 11 = House 12.
+  static const List<List<double>> _houseC = [
+    [0.50, 0.26], [0.26, 0.14], [0.14, 0.26], [0.28, 0.50],
+    [0.14, 0.74], [0.26, 0.86], [0.50, 0.74], [0.74, 0.86],
+    [0.86, 0.74], [0.72, 0.50], [0.86, 0.26], [0.74, 0.14],
+  ];
+  Widget _boxPlanet(LiveBody b) => SizedBox(width: 26,
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(width: 26, height: 26,
+        child: Stack(alignment: Alignment.center, children: [
+          if (b.retro) CachedNetworkImage(
+            imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+            width: 26, height: 26, fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => const SizedBox.shrink()),
+          CachedNetworkImage(
+            imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+            width: 20, height: 20, fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+        ])),
+      Text('${(b.lon % 30).floor()}°',
+        style: const TextStyle(color: kMuted, fontSize: 7.5,
+          fontWeight: FontWeight.w700)),
+    ]));
+  Widget _boxHouse(int h, int signIdx, List<LiveBody> here) => Column(
+    mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      Row(mainAxisSize: MainAxisSize.min, children: [
+        Text('$h', style: TextStyle(
+          color: elementColor(signs[signIdx].element),
+          fontSize: 11, fontWeight: FontWeight.w800)),
+        const SizedBox(width: 3),
+        CachedNetworkImage(
+          imageUrl: signSymbolUrl(signIdx, vedic: vedic),
+          width: 22, height: 22, fit: BoxFit.contain,
+          errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)),
+      ]),
+      if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2),
+        child: Wrap(spacing: 2, runSpacing: 1, alignment: WrapAlignment.center,
+          children: here.map(_boxPlanet).toList())),
+    ]);
+  // House 1 = the tapped sign (selSign) or, if none, the Ascendant's sign;
+  // the rest settle around it (whole-sign houses).
+  Widget _box() => LayoutBuilder(builder: (_, box) {
+    final sz = math.min(box.maxWidth, 360.0);
+    final h1 = selSign ?? chart.ascSign;
+    final kids = <Widget>[
+      CustomPaint(size: Size(sz, sz), painter: _BoxPainter()),
+    ];
+    for (int h = 1; h <= 12; h++) {
+      final signIdx = (h1 + h - 1) % 12;
+      final here = chart.bodies.where((b) =>
+        ((b.sign - h1) % 12 + 12) % 12 + 1 == h).toList();
+      final cx = _houseC[h - 1][0] * sz, cy = _houseC[h - 1][1] * sz;
+      kids.add(Positioned(
+        left: cx - 44, top: cy - 36, width: 88, height: 72,
+        child: Center(child: FittedBox(fit: BoxFit.scaleDown,
+          child: _boxHouse(h, signIdx, here)))));
+    }
+    // Ascendant / Lagna pill — placed in the house that currently holds the
+    // Ascendant, so it MOVES as the chart changes (not fixed), like the site.
+    final ascHouse = ((chart.ascSign - h1) % 12 + 12) % 12 + 1;
+    final acx = _houseC[ascHouse - 1][0] * sz, acy = _houseC[ascHouse - 1][1] * sz;
+    kids.add(Positioned(
+      left: acx - 54, top: (acy - 46).clamp(0.0, sz - 20).toDouble(), width: 108,
+      child: Center(child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(color: kBg,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: kGold, width: 1.3)),
+        child: Text('$ascWord ${_fmtDeg(chart.asc)}',
+          maxLines: 1,
+          style: const TextStyle(color: kGold, fontSize: 10,
+            fontWeight: FontWeight.w800))))));
+    return Center(child: SizedBox(width: sz, height: sz,
+      child: Stack(children: kids)));
+  });
+
+  @override
+  Widget build(BuildContext context) => boxMode ? _box() : _wheel();
+}
+
+class LiveSkyScreen extends StatefulWidget {
+  final bool vedic;
+  const LiveSkyScreen({super.key, required this.vedic});
+  @override
+  State<LiveSkyScreen> createState() => _LiveSkyScreenState();
+}
+
+class _LiveSkyScreenState extends State<LiveSkyScreen> {
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 60),
+      (_) { if (mounted) setState(() {}); });
+  }
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
 
   Widget _boxRow(LiveBody b, AppLang l) {
     final signName = signs[b.sign].name[l] ?? signs[b.sign].name[AppLang.en]!;
@@ -1386,84 +1492,6 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
           child: Icon(ic, color: active ? kBg : kLight, size: 22))));
   }
 
-  // House-content centres for the North-Indian square (unit square, top-left
-  // origin), index 0 = House 1 … index 11 = House 12.
-  static const List<List<double>> _houseC = [
-    [0.50, 0.26], [0.26, 0.14], [0.14, 0.26], [0.28, 0.50],
-    [0.14, 0.74], [0.26, 0.86], [0.50, 0.74], [0.74, 0.86],
-    [0.86, 0.74], [0.72, 0.50], [0.86, 0.26], [0.74, 0.14],
-  ];
-  Widget _boxPlanet(LiveBody b) => SizedBox(width: 26,
-    child: Column(mainAxisSize: MainAxisSize.min, children: [
-      SizedBox(width: 26, height: 26,
-        child: Stack(alignment: Alignment.center, children: [
-          if (b.retro) CachedNetworkImage(
-            imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
-            width: 26, height: 26, fit: BoxFit.contain,
-            errorWidget: (_, __, ___) => const SizedBox.shrink()),
-          CachedNetworkImage(
-            imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
-            width: 20, height: 20, fit: BoxFit.contain,
-            errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
-        ])),
-      Text('${(b.lon % 30).floor()}°',
-        style: const TextStyle(color: kMuted, fontSize: 7.5,
-          fontWeight: FontWeight.w700)),
-    ]));
-  Widget _boxHouse(int h, int signIdx, List<LiveBody> here) => Column(
-    mainAxisSize: MainAxisSize.min, mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      Row(mainAxisSize: MainAxisSize.min, children: [
-        Text('$h', style: TextStyle(
-          color: elementColor(signs[signIdx].element),
-          fontSize: 11, fontWeight: FontWeight.w800)),
-        const SizedBox(width: 3),
-        CachedNetworkImage(
-          imageUrl: signSymbolUrl(signIdx, vedic: widget.vedic),
-          width: 22, height: 22, fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => const SizedBox(width: 22, height: 22)),
-      ]),
-      if (here.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2),
-        child: Wrap(spacing: 2, runSpacing: 1, alignment: WrapAlignment.center,
-          children: here.map(_boxPlanet).toList())),
-    ]);
-  // House 1 = the tapped sign (_selSign) or, if none, the Ascendant's sign;
-  // the rest settle around it (whole-sign houses).
-  Widget _box(LiveChart chart, String ascWord) => LayoutBuilder(builder: (_, box) {
-    final sz = math.min(box.maxWidth, 360.0);
-    final h1 = _selSign ?? chart.ascSign;
-    final kids = <Widget>[
-      CustomPaint(size: Size(sz, sz), painter: _BoxPainter()),
-    ];
-    for (int h = 1; h <= 12; h++) {
-      final signIdx = (h1 + h - 1) % 12;
-      final here = chart.bodies.where((b) =>
-        ((b.sign - h1) % 12 + 12) % 12 + 1 == h).toList();
-      final cx = _houseC[h - 1][0] * sz, cy = _houseC[h - 1][1] * sz;
-      kids.add(Positioned(
-        left: cx - 44, top: cy - 36, width: 88, height: 72,
-        child: Center(child: FittedBox(fit: BoxFit.scaleDown,
-          child: _boxHouse(h, signIdx, here)))));
-    }
-    // Ascendant / Lagna pill — placed in the house that currently holds the
-    // Ascendant, so it MOVES as the hours/days change (not fixed), like the site.
-    final ascHouse = ((chart.ascSign - h1) % 12 + 12) % 12 + 1;
-    final acx = _houseC[ascHouse - 1][0] * sz, acy = _houseC[ascHouse - 1][1] * sz;
-    kids.add(Positioned(
-      left: acx - 54, top: (acy - 46).clamp(0.0, sz - 20).toDouble(), width: 108,
-      child: Center(child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(color: kBg,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: kGold, width: 1.3)),
-        child: Text('$ascWord ${_fmtDeg(chart.asc)}',
-          maxLines: 1,
-          style: const TextStyle(color: kGold, fontSize: 10,
-            fontWeight: FontWeight.w800))))));
-    return Center(child: SizedBox(width: sz, height: sz,
-      child: Stack(children: kids)));
-  });
-
   @override
   Widget build(BuildContext context) {
     final l = currentLang.value;
@@ -1526,7 +1554,8 @@ class _LiveSkyScreenState extends State<LiveSkyScreen> {
                 _zodiacStrip(),
                 const SizedBox(height: 10),
               ],
-              _boxMode ? _box(chart, ascWord) : _wheel(chart),
+              NatalChartView(chart: chart, vedic: widget.vedic,
+                boxMode: _boxMode, selSign: _selSign, ascWord: ascWord),
               const SizedBox(height: 8),
               // Bottom bar: Circle toggle (left) · date nav · Box toggle (right).
               Row(children: [
@@ -2877,49 +2906,358 @@ class _DateCalculatorScreenState extends State<DateCalculatorScreen> {
 }
 
 // ===========================================================================
-// ZODIAC tab — all 12 signs
+// BIRTH CHART tab — the user's own natal chart (Western + Vedic). Replaces the
+// old duplicate Zodiac grid. v1: one saved birth profile (date/time/place) →
+// box + round natal chart (via NatalChartView) + planet positions table with
+// sign, nakshatra (Vedic), house and retrograde. Readings & divisional charts
+// (D1–D60) come in a later session.
 // ===========================================================================
-class ZodiacTab extends StatelessWidget {
-  const ZodiacTab({super.key});
+class BirthChartTab extends StatefulWidget {
+  const BirthChartTab({super.key});
+  @override
+  State<BirthChartTab> createState() => _BirthChartTabState();
+}
+
+class _BirthChartTabState extends State<BirthChartTab> {
+  bool _set = false;       // a birth profile has been saved
+  bool _editing = false;   // showing the entry form
+  String _name = '';
+  int _y = 0, _mo = 0, _d = 0, _hh = 0, _mi = 0, _cityIdx = 0;
+  bool _datePicked = false, _timePicked = false;
+  bool _boxMode = false;   // circle (false) / box (true)
+  final _nameCtrl = TextEditingController();
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
-    valueListenable: useVedic,
-    builder: (_, vedic, __) => Center(child: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 900),
-      child: Column(children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: SystemToggle()),
-        Expanded(child: LayoutBuilder(builder: (_, box) {
-          final cols = (box.maxWidth / 170).floor().clamp(2, 5);
-          return GridView.builder(
-            padding: EdgeInsets.fromLTRB(20, 4, 20,
-              24 + MediaQuery.of(context).viewPadding.bottom),
-            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: cols, mainAxisSpacing: 12,
-              crossAxisSpacing: 12, childAspectRatio: 1.02),
-            itemCount: signs.length,
-            itemBuilder: (ctx, i) => GestureDetector(
-              onTap: () => showSignSheet(ctx, signs[i]),
-              child: Container(
-                decoration: BoxDecoration(color: kCard,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: kBorder)),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    SignIcon(i, size: 44),
-                    const SizedBox(height: 6),
-                    Text(signName(signs[i]),
-                      style: TextStyle(color: kOn, fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: urduFont)),
-                    const SizedBox(height: 2),
-                    Text(signDates(signs[i]),
-                      style: const TextStyle(color: kMuted, fontSize: 11)),
-                  ]))));
-        })),
-      ]))));
+  void initState() {
+    super.initState();
+    _set = prefs.getBool('bSet') ?? false;
+    _name = prefs.getString('bName') ?? '';
+    _y = prefs.getInt('bY') ?? 0;
+    _mo = prefs.getInt('bMo') ?? 0;
+    _d = prefs.getInt('bD') ?? 0;
+    _hh = prefs.getInt('bH') ?? 0;
+    _mi = prefs.getInt('bMi') ?? 0;
+    _cityIdx = prefs.getInt('bCity') ?? 0;
+    _datePicked = _y > 0 && _mo > 0 && _d > 0;
+    _timePicked = prefs.getBool('bTimeSet') ?? false;
+    _nameCtrl.text = _name;
+    _editing = !_set;
+  }
+
+  @override
+  void dispose() { _nameCtrl.dispose(); super.dispose(); }
+
+  String _t(Map<AppLang, String> m) => m[currentLang.value] ?? m[AppLang.en]!;
+
+  // ---- birth moment → chart -------------------------------------------------
+  LiveChart _compute(bool vedic) {
+    final city = _cities[_cityIdx];
+    final tz = (city['tz'] as num).toDouble();
+    final lat = (city['lat'] as num).toDouble();
+    final lonE = (city['lon'] as num).toDouble();
+    // Birth wall-clock is local to the birth city; convert to real UTC.
+    final utc = DateTime.utc(_y, _mo, _d, _hh, _mi)
+      .subtract(Duration(minutes: (tz * 60).round()));
+    return computeChart(utc, lat, lonE, vedic);
+  }
+
+  String _nak(double lon) =>
+    _nakshatras[(_norm(lon) / (360.0 / 27.0)).floor().clamp(0, 26)];
+  String _dateStr() =>
+    '${_d.toString().padLeft(2, '0')}/${_mo.toString().padLeft(2, '0')}/$_y';
+  String _timeStr() =>
+    '${_hh.toString().padLeft(2, '0')}:${_mi.toString().padLeft(2, '0')}';
+  String _birthLine() {
+    final c = _cities[_cityIdx];
+    return '${_dateStr()}  ·  ${_timeStr()}  ·  ${c['n']} ${_flag(c['c'] as String)}';
+  }
+
+  // ---- pickers --------------------------------------------------------------
+  ThemeData _pickerTheme(BuildContext ctx) => Theme.of(ctx).copyWith(
+    colorScheme: const ColorScheme.dark(
+      primary: kPrimary, onPrimary: Colors.white,
+      surface: kCard, onSurface: kOn));
+
+  Future<void> _pickDate() async {
+    final r = await showDatePicker(
+      context: context,
+      initialDate: _datePicked ? DateTime(_y, _mo, _d) : DateTime(1995, 1, 1),
+      firstDate: DateTime(1900), lastDate: DateTime.now(),
+      builder: (ctx, child) => Theme(data: _pickerTheme(ctx), child: child!));
+    if (r != null) {
+      setState(() { _y = r.year; _mo = r.month; _d = r.day; _datePicked = true; });
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final r = await showTimePicker(
+      context: context,
+      initialTime: _timePicked
+        ? TimeOfDay(hour: _hh, minute: _mi) : const TimeOfDay(hour: 7, minute: 30),
+      builder: (ctx, child) => Theme(data: _pickerTheme(ctx), child: child!));
+    if (r != null) {
+      setState(() { _hh = r.hour; _mi = r.minute; _timePicked = true; });
+    }
+  }
+
+  void _pickCity() => showModalBottomSheet(
+    context: context, backgroundColor: kCard, isScrollControlled: true,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+    builder: (_) => SafeArea(child: SizedBox(height: 440,
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _cities.length,
+        itemBuilder: (_, i) {
+          final c = _cities[i];
+          return ListTile(
+            leading: Text(_flag(c['c'] as String),
+              style: const TextStyle(fontSize: 22)),
+            title: Text('${c['n']}',
+              style: const TextStyle(color: kOn, fontWeight: FontWeight.w600)),
+            trailing: i == _cityIdx
+              ? const Icon(Icons.check, color: kGold) : null,
+            onTap: () {
+              setState(() => _cityIdx = i);
+              Navigator.pop(context);
+            });
+        }))));
+
+  void _save() {
+    _name = _nameCtrl.text.trim();
+    prefs.setBool('bSet', true);
+    prefs.setBool('bTimeSet', true);
+    prefs.setString('bName', _name);
+    prefs.setInt('bY', _y);
+    prefs.setInt('bMo', _mo);
+    prefs.setInt('bD', _d);
+    prefs.setInt('bH', _hh);
+    prefs.setInt('bMi', _mi);
+    prefs.setInt('bCity', _cityIdx);
+    setState(() { _set = true; _editing = false; });
+  }
+
+  // ---- form widgets ---------------------------------------------------------
+  Widget _pickRow(String label, String value, IconData ic, VoidCallback tap) =>
+    Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+      child: InkWell(onTap: tap, borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+          decoration: BoxDecoration(color: kBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: kBorder)),
+          child: Row(children: [
+            Icon(ic, color: kLight, size: 18),
+            const SizedBox(width: 12),
+            Text(label, style: const TextStyle(color: kMuted,
+              fontSize: 13.5, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            Flexible(child: Text(value, textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: kOn, fontSize: 14,
+                fontWeight: FontWeight.w700))),
+          ]))));
+
+  Widget _form() {
+    final canShow = _datePicked && _timePicked;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(18, 18, 18,
+        28 + MediaQuery.of(context).viewPadding.bottom),
+      children: [
+        Center(child: Text(_t({
+          AppLang.en: 'Your Birth Chart', AppLang.ur: 'آپ کا پیدائشی چارٹ',
+          AppLang.hi: 'आपकी जन्म कुंडली', AppLang.ar: 'خريطة ميلادك'}),
+          style: TextStyle(color: kGold, fontSize: 21,
+            fontWeight: FontWeight.w800, fontFamily: urduFont))),
+        const SizedBox(height: 6),
+        Center(child: Text(_t({
+          AppLang.en: 'Enter your birth date, time and place to see your natal chart.',
+          AppLang.ur: 'اپنی پیدائش کی تاریخ، وقت اور جگہ درج کریں۔',
+          AppLang.hi: 'अपनी जन्म तिथि, समय और स्थान भरें।',
+          AppLang.ar: 'أدخل تاريخ ووقت ومكان ميلادك.'}),
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: kMuted, fontSize: 13.5, height: 1.6))),
+        const SizedBox(height: 18),
+        card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _nameCtrl,
+              style: const TextStyle(color: kOn, fontSize: 15,
+                fontWeight: FontWeight.w700),
+              decoration: InputDecoration(
+                hintText: _t({AppLang.en: 'Name (optional)',
+                  AppLang.ur: 'نام (اختیاری)', AppLang.hi: 'नाम (वैकल्पिक)',
+                  AppLang.ar: 'الاسم (اختياري)'}),
+                hintStyle: const TextStyle(color: kMuted),
+                isDense: true, filled: true, fillColor: kBg,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 14),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: kBorder)),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: kPrimary)))),
+            const SizedBox(height: 10),
+            _pickRow(_t({AppLang.en: 'Date', AppLang.ur: 'تاریخ',
+              AppLang.hi: 'तिथि', AppLang.ar: 'التاريخ'}),
+              _datePicked ? _dateStr() : _t({AppLang.en: 'Select',
+                AppLang.ur: 'منتخب کریں', AppLang.hi: 'चुनें', AppLang.ar: 'اختر'}),
+              Icons.calendar_today, _pickDate),
+            _pickRow(_t({AppLang.en: 'Time', AppLang.ur: 'وقت',
+              AppLang.hi: 'समय', AppLang.ar: 'الوقت'}),
+              _timePicked ? _timeStr() : _t({AppLang.en: 'Select',
+                AppLang.ur: 'منتخب کریں', AppLang.hi: 'चुनें', AppLang.ar: 'اختر'}),
+              Icons.access_time, _pickTime),
+            _pickRow(_t({AppLang.en: 'Place', AppLang.ur: 'جگہ',
+              AppLang.hi: 'स्थान', AppLang.ar: 'المكان'}),
+              '${_cities[_cityIdx]['n']} ${_flag(_cities[_cityIdx]['c'] as String)}',
+              Icons.place, _pickCity),
+            const SizedBox(height: 18),
+            SizedBox(width: double.infinity, child: ElevatedButton(
+              onPressed: canShow ? _save : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: kPrimary, disabledBackgroundColor: kCard,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14))),
+              child: Text(_t({AppLang.en: 'Show my chart',
+                AppLang.ur: 'میرا چارٹ دکھائیں', AppLang.hi: 'मेरी कुंडली दिखाएँ',
+                AppLang.ar: 'اعرض خريطتي'}),
+                style: TextStyle(
+                  color: canShow ? Colors.white : kMuted, fontSize: 15,
+                  fontWeight: FontWeight.w800, fontFamily: urduFont)))),
+            if (_set) Center(child: TextButton(
+              onPressed: () => setState(() => _editing = false),
+              child: Text(_t({AppLang.en: 'Cancel', AppLang.ur: 'منسوخ',
+                AppLang.hi: 'रद्द करें', AppLang.ar: 'إلغاء'}),
+                style: const TextStyle(color: kMuted,
+                  fontWeight: FontWeight.w700)))),
+          ])),
+      ]);
+  }
+
+  // ---- chart view widgets ---------------------------------------------------
+  Widget _viewToggle(bool box, IconData ic) {
+    final active = _boxMode == box;
+    return Material(
+      color: active ? kGold : kCard, shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: () => setState(() => _boxMode = box),
+        child: Padding(padding: const EdgeInsets.all(9),
+          child: Icon(ic, color: active ? kBg : kLight, size: 22))));
+  }
+
+  Widget _planetRow(LiveBody b, bool vedic, AppLang l) {
+    final sName = signs[b.sign].name[l] ?? signs[b.sign].name[AppLang.en]!;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        SizedBox(width: 28, height: 28, child: Stack(
+          clipBehavior: Clip.none, alignment: Alignment.center, children: [
+            if (b.retro) CachedNetworkImage(
+              imageUrl: '$kWebsite/app/planet-icons-v2/retroglow.png',
+              width: 26, height: 26, fit: BoxFit.contain,
+              errorWidget: (_, __, ___) => const SizedBox.shrink()),
+            CachedNetworkImage(
+              imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[b.key]}',
+              width: 20, height: 20, fit: BoxFit.contain,
+              errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
+          ])),
+        const SizedBox(width: 10),
+        Expanded(flex: 3, child: Text(b.key,
+          style: const TextStyle(color: kOn, fontSize: 13.5,
+            fontWeight: FontWeight.w700))),
+        Expanded(flex: 4, child: Text('$sName ${_fmtDeg(b.lon)}',
+          style: TextStyle(color: kMuted, fontSize: 12.5,
+            fontWeight: FontWeight.w600, fontFamily: urduFont))),
+        if (vedic) Expanded(flex: 3, child: Text(_nak(b.lon),
+          maxLines: 1, overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: kLight, fontSize: 11.5,
+            fontWeight: FontWeight.w600))),
+        if (b.retro) const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: Text('R', style: TextStyle(color: Colors.redAccent,
+            fontSize: 11, fontWeight: FontWeight.w800))),
+        SizedBox(width: 30, child: Text('H${b.house}', textAlign: TextAlign.end,
+          style: const TextStyle(color: kLight, fontSize: 12,
+            fontWeight: FontWeight.w700))),
+      ]));
+  }
+
+  Widget _chartView(bool vedic, AppLang l) {
+    final chart = _compute(vedic);
+    final ascWord = vedic
+      ? _t({AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न',
+          AppLang.ar: 'الطالع'})
+      : _t({AppLang.en: 'Ascendant', AppLang.ur: 'طالع', AppLang.hi: 'लग्न',
+          AppLang.ar: 'الطالع'});
+    final ascSignName =
+      signs[chart.ascSign].name[l] ?? signs[chart.ascSign].name[AppLang.en]!;
+    return ListView(
+      padding: EdgeInsets.fromLTRB(16, 14, 16,
+        28 + MediaQuery.of(context).viewPadding.bottom),
+      children: [
+        const SystemToggle(),
+        card(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              Expanded(child: Text(
+                _name.isEmpty
+                  ? _t({AppLang.en: 'Birth Chart',
+                      AppLang.ur: 'پیدائشی چارٹ', AppLang.hi: 'जन्म कुंडली',
+                      AppLang.ar: 'خريطة الميلاد'})
+                  : _name,
+                style: TextStyle(color: kGold, fontSize: 17,
+                  fontWeight: FontWeight.w800, fontFamily: urduFont))),
+              InkWell(
+                onTap: () => setState(() => _editing = true),
+                borderRadius: BorderRadius.circular(20),
+                child: const Padding(padding: EdgeInsets.all(4),
+                  child: Icon(Icons.edit, color: kLight, size: 18))),
+            ]),
+            const SizedBox(height: 4),
+            Text(_birthLine(),
+              style: const TextStyle(color: kMuted, fontSize: 13,
+                fontWeight: FontWeight.w600)),
+          ])),
+        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          _viewToggle(false, Icons.circle_outlined),
+          const SizedBox(width: 14),
+          _viewToggle(true, Icons.crop_square),
+        ]),
+        const SizedBox(height: 10),
+        NatalChartView(chart: chart, vedic: vedic,
+          boxMode: _boxMode, ascWord: ascWord),
+        const SizedBox(height: 14),
+        card(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const Icon(Icons.arrow_upward, color: kGold, size: 18),
+              const SizedBox(width: 6),
+              Text('$ascWord: ',
+                style: TextStyle(color: kGold, fontSize: 14.5,
+                  fontWeight: FontWeight.w800, fontFamily: urduFont)),
+              Text('$ascSignName ${_fmtDeg(chart.asc)}',
+                style: const TextStyle(color: kOn, fontSize: 14.5,
+                  fontWeight: FontWeight.w700)),
+            ]),
+            const Divider(color: kBorder, height: 20),
+            ...chart.bodies.map((b) => _planetRow(b, vedic, l)),
+          ])),
+      ]);
+  }
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<AppLang>(
+    valueListenable: currentLang,
+    builder: (_, l, __) => ValueListenableBuilder<bool>(
+      valueListenable: useVedic,
+      builder: (_, vedic, __) => Directionality(
+        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+        child: Center(child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: (_editing || !_set) ? _form() : _chartView(vedic, l))))));
 }
 
 void showSignSheet(BuildContext context, ZSign sign) {
