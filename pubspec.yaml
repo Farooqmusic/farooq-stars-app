@@ -24,6 +24,8 @@ dependencies:
   share_plus: ^13.1.0
   # ---- IANA timezone database — DST-correct birth-time → UTC for any city ----
   timezone: ^0.9.4
+  # ---- Full-report PDF (pages are rendered images, so every script is exact) ----
+  pdf: ^3.11.1
   package_info_plus: ^10.2.0
   # ---- In-app browser for the big Live Sky charts + calendars (Build 13) ----
   webview_flutter: ^4.7.0

@@ -20,6 +20,8 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -3524,6 +3526,201 @@ Future<ui.Image?> _loadUiImage(String url) async {
   }
 }
 
+// Bundle of decoded images used across every report page (fetched once).
+class _RptImgs {
+  final ui.Image? bg;
+  final ui.Image? glow;
+  final Map<String, ui.Image?> planets;
+  final Map<int, ui.Image?> signs;
+  const _RptImgs(this.bg, this.glow, this.planets, this.signs);
+}
+
+Future<_RptImgs> _fetchRptImgs(bool vedic, int refSign) async {
+  final imgs = await Future.wait<ui.Image?>([
+    _loadUiImage(signBigArtUrl(refSign)),
+    _loadUiImage('$kWebsite/app/planet-icons-v2/retroglow.png'),
+    ..._rGrahas.map((k) =>
+      _loadUiImage('$kWebsite/app/planet-icons-v2/${_livePlanetIcon[k]}')),
+    ...List.generate(12, (i) => _loadUiImage(signSymbolUrl(i, vedic: vedic))),
+  ]);
+  final planets = <String, ui.Image?>{};
+  for (int i = 0; i < _rGrahas.length; i++) planets[_rGrahas[i]] = imgs[2 + i];
+  final signsM = <int, ui.Image?>{};
+  for (int i = 0; i < 12; i++) signsM[i] = imgs[2 + _rGrahas.length + i];
+  return _RptImgs(imgs[0], imgs[1], planets, signsM);
+}
+
+// Draw a ui.Image into a destination rect (no-op if null).
+void _drawUi(Canvas c, ui.Image? im, Rect dst) {
+  if (im == null) return;
+  c.drawImageRect(im,
+    Rect.fromLTWH(0, 0, im.width.toDouble(), im.height.toDouble()),
+    dst, Paint()..filterQuality = FilterQuality.medium);
+}
+
+// A laid-out TextPainter (uses the phone's fonts → every script renders).
+TextPainter _rptTp(String s, double size, Color col,
+    {FontWeight fw = FontWeight.w600, TextAlign align = TextAlign.left,
+     double maxW = 100000}) {
+  return TextPainter(
+    text: TextSpan(text: s, style: TextStyle(color: col, fontSize: size,
+      fontWeight: fw, height: 1.4, fontFamily: urduFont)),
+    textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+    textAlign: align)
+    ..layout(maxWidth: maxW);
+}
+
+// Draw the North-Indian box (sign symbols + house numbers + planets) at (x0,y0)
+// with side cs. Shared by the report card and each D-chart page.
+void _drawReportBox(Canvas c, double x0, double y0, double cs,
+    LiveChart chart, int h1, _RptImgs im) {
+  c.drawRect(Rect.fromLTWH(x0, y0, cs, cs), Paint()..color = kPlate);
+  final frame = Paint()..style = PaintingStyle.stroke
+    ..strokeWidth = cs * 0.004 + 0.6..color = const Color(0xFF4A3866);
+  c.drawRect(Rect.fromLTWH(x0, y0, cs, cs), Paint()..style = PaintingStyle.stroke
+    ..strokeWidth = cs * 0.005 + 0.6..color = kPlateBorder);
+  c.drawLine(Offset(x0, y0), Offset(x0 + cs, y0 + cs), frame);
+  c.drawLine(Offset(x0 + cs, y0), Offset(x0, y0 + cs), frame);
+  c.drawPath(Path()
+    ..moveTo(x0 + cs / 2, y0)..lineTo(x0 + cs, y0 + cs / 2)
+    ..lineTo(x0 + cs / 2, y0 + cs)..lineTo(x0, y0 + cs / 2)..close(), frame);
+  final sIc = cs * 0.07, pIc = cs * 0.064, gIc = cs * 0.084;
+  for (int hh = 1; hh <= 12; hh++) {
+    final signIdx = (h1 + hh - 1) % 12;
+    final here = chart.bodies.where((b) => _rGrahas.contains(b.key) &&
+      ((b.sign - h1) % 12 + 12) % 12 + 1 == hh).toList();
+    final hx = x0 + _kHouseC[hh - 1][0] * cs, hy = y0 + _kHouseC[hh - 1][1] * cs;
+    _drawUi(c, im.signs[signIdx],
+      Rect.fromCenter(center: Offset(hx + cs * 0.032, hy - cs * 0.038),
+        width: sIc, height: sIc));
+    final tp = _rptTp('$hh', cs * 0.04, elementColor(signs[signIdx].element),
+      fw: FontWeight.w800);
+    tp.paint(c, Offset(hx - cs * 0.05, hy - cs * 0.075));
+    if (here.isNotEmpty) {
+      double px = hx - (here.length - 1) * cs * 0.038;
+      for (final b in here) {
+        if (b.retro) {
+          _drawUi(c, im.glow,
+            Rect.fromCenter(center: Offset(px, hy + cs * 0.04), width: gIc, height: gIc));
+        }
+        _drawUi(c, im.planets[b.key],
+          Rect.fromCenter(center: Offset(px, hy + cs * 0.04), width: pIc, height: pIc));
+        px += cs * 0.076;
+      }
+    }
+  }
+}
+
+// A single stacked element on a report page (measure height, then draw).
+class _RE {
+  final double Function(double w) measure;
+  final void Function(Canvas c, double x, double y, double w) draw;
+  final double gap;
+  double h = 0;
+  _RE(this.measure, this.draw, {this.gap = 10});
+}
+
+_RE _reSpace(double gap) => _RE((w) => 0, (c, x, y, w) {}, gap: gap);
+
+_RE _reText(String s, double size, Color col,
+    {FontWeight fw = FontWeight.w600, TextAlign align = TextAlign.start,
+     double gap = 10}) {
+  final a = align == TextAlign.start
+    ? (rtl ? TextAlign.right : TextAlign.left) : align;
+  TextPainter? tp;
+  return _RE(
+    (w) { tp = _rptTp(s, size, col, fw: fw, align: a, maxW: w); return tp!.height; },
+    (c, x, y, w) => tp!.paint(c, Offset(x, y)), gap: gap);
+}
+
+_RE _reRich(List<TextSpan> spans, double size, {double gap = 12}) {
+  TextPainter? tp;
+  return _RE(
+    (w) {
+      tp = TextPainter(
+        text: TextSpan(style: TextStyle(fontSize: size, height: 1.45,
+          color: kOn, fontFamily: urduFont), children: spans),
+        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+        textAlign: rtl ? TextAlign.right : TextAlign.left)..layout(maxWidth: w);
+      return tp!.height;
+    },
+    (c, x, y, w) => tp!.paint(c, Offset(x, y)), gap: gap);
+}
+
+_RE _reIconRich(ui.Image? icon, List<TextSpan> spans, double size,
+    {double gap = 12}) {
+  TextPainter? tp;
+  final isz = size * 1.35;
+  return _RE(
+    (w) {
+      tp = TextPainter(
+        text: TextSpan(style: TextStyle(fontSize: size, height: 1.45,
+          color: kOn, fontFamily: urduFont), children: spans),
+        textDirection: rtl ? TextDirection.rtl : TextDirection.ltr,
+        textAlign: rtl ? TextAlign.right : TextAlign.left)
+        ..layout(maxWidth: w - isz - 14);
+      return math.max(tp!.height, isz);
+    },
+    (c, x, y, w) {
+      if (rtl) {
+        _drawUi(c, icon, Rect.fromLTWH(x + w - isz, y, isz, isz));
+        tp!.paint(c, Offset(x, y));
+      } else {
+        _drawUi(c, icon, Rect.fromLTWH(x, y, isz, isz));
+        tp!.paint(c, Offset(x + isz + 14, y));
+      }
+    }, gap: gap);
+}
+
+_RE _reRow(ui.Image? icon, String left, String right, double size,
+    Color lc, Color rc, {double gap = 8}) {
+  final isz = size * 1.3;
+  TextPainter? lt, rt;
+  return _RE(
+    (w) {
+      lt = _rptTp(left, size, lc, fw: FontWeight.w700, maxW: w * 0.55);
+      rt = _rptTp(right, size, rc, fw: FontWeight.w600, maxW: w * 0.42);
+      return math.max(isz, math.max(lt!.height, rt!.height));
+    },
+    (c, x, y, w) {
+      final rh = math.max(isz, math.max(lt!.height, rt!.height));
+      if (rtl) {
+        _drawUi(c, icon, Rect.fromLTWH(x + w - isz, y + (rh - isz) / 2, isz, isz));
+        lt!.paint(c, Offset(x + w - isz - 12 - lt!.width, y + (rh - lt!.height) / 2));
+        rt!.paint(c, Offset(x, y + (rh - rt!.height) / 2));
+      } else {
+        _drawUi(c, icon, Rect.fromLTWH(x, y + (rh - isz) / 2, isz, isz));
+        lt!.paint(c, Offset(x + isz + 12, y + (rh - lt!.height) / 2));
+        rt!.paint(c, Offset(x + w - rt!.width, y + (rh - rt!.height) / 2));
+      }
+    }, gap: gap);
+}
+
+_RE _reBox(LiveChart chart, int h1, _RptImgs im, double cs, {double gap = 18}) =>
+  _RE((w) => cs, (c, x, y, w) =>
+    _drawReportBox(c, x + (w - cs) / 2, y, cs, chart, h1, im), gap: gap);
+
+// Render a list of stacked elements to a variable-height PNG page.
+Future<List<Object>?> _renderReportPage(List<_RE> els, Color accent,
+    {double width = 1000, double pad = 56}) async {
+  final cw = width - pad * 2;
+  double y = pad;
+  for (final e in els) { e.h = e.measure(cw); y += e.h + e.gap; }
+  final total = y + pad;
+  final rec = ui.PictureRecorder();
+  final c = Canvas(rec, Rect.fromLTWH(0, 0, width, total));
+  c.drawRect(Rect.fromLTWH(0, 0, width, total), Paint()..color = kBg);
+  c.drawRect(Rect.fromLTWH(18, 18, width - 36, total - 36),
+    Paint()..style = PaintingStyle.stroke..strokeWidth = 3
+      ..color = accent.withOpacity(0.7));
+  double yy = pad;
+  for (final e in els) { e.draw(c, pad, yy, cw); yy += e.h + e.gap; }
+  final img = await rec.endRecording().toImage(width.toInt(), total.toInt());
+  final bd = await img.toByteData(format: ui.ImageByteFormat.png);
+  if (bd == null) return null;
+  return [bd.buffer.asUint8List(), width, total];
+}
+
 // ===========================================================================
 // DIVISIONAL (VARGA) CHARTS — D1..D60, Vedic only. vargaSign() ported verbatim
 // from the website (Parashari rules), verified in Python. Each chart re-maps a
@@ -4179,11 +4376,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
     return '';
   }
 
-  // Share a beautiful colour report card (like the website's) to WhatsApp /
-  // any app. Generates a 1080×1350 PNG on-device, falls back to the sign
-  // artwork, then to a wa.me text share.
-  Future<void> _shareChart(bool vedic, int refSign, AppLang l,
-      LiveChart chart) async {
+  String _shareCaption(bool vedic, int refSign, AppLang l) {
     final signName = signs[refSign].name[l] ?? signs[refSign].name[AppLang.en]!;
     final refMode = vedic ? _refV : _refW;
     final refLabel = refMode == 'asc'
@@ -4194,34 +4387,65 @@ class _BirthChartTabState extends State<BirthChartTab> {
     final sysName = vedic
       ? _t({AppLang.en: 'Vedic Birth Chart', AppLang.ur: 'ویدک پیدائشی چارٹ', AppLang.hi: 'वैदिक जन्म कुंडली', AppLang.ar: 'خريطة الميلاد الفيدية'})
       : _t({AppLang.en: 'Western Birth Chart', AppLang.ur: 'مغربی پیدائشی چارٹ', AppLang.hi: 'पश्चिमी जन्म कुंडली', AppLang.ar: 'خريطة الميلاد الغربية'});
-    final buf = StringBuffer()
+    return (StringBuffer()
       ..writeln('✦ ${_name.isEmpty ? sysName : '$_name — $sysName'}')
       ..writeln('$refLabel: $signName')
       ..writeln(_birthLine())
       ..writeln('')
-      ..writeln('📲 Farooq Stars: $kWebsite');
-    final text = buf.toString();
+      ..writeln('📲 Farooq Stars: $kWebsite')).toString();
+  }
 
-    // Loading spinner while we build the report image (several image fetches).
+  // Share menu: quick colour card, or the full multi-page PDF report.
+  Future<void> _shareChart(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
+    final acc = accentColor(vedic);
+    await showModalBottomSheet<void>(context: context, backgroundColor: kCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(width: 40, height: 4, decoration: BoxDecoration(
+            color: kBorder, borderRadius: BorderRadius.circular(2))),
+          const SizedBox(height: 8),
+          ListTile(
+            leading: Icon(Icons.image_outlined, color: acc),
+            title: Text(_t({AppLang.en: 'Chart card (image)', AppLang.ur: 'چارٹ کارڈ (تصویر)', AppLang.hi: 'चार्ट कार्ड (इमेज)', AppLang.ar: 'بطاقة (صورة)'}),
+              style: const TextStyle(color: kOn, fontWeight: FontWeight.w700,
+                fontFamily: null)),
+            subtitle: Text(_t({AppLang.en: 'Quick — the colour card', AppLang.ur: 'فوری — رنگین کارڈ', AppLang.hi: 'त्वरित — रंगीन कार्ड', AppLang.ar: 'سريع — البطاقة الملوّنة'}),
+              style: const TextStyle(color: kMuted, fontSize: 12)),
+            onTap: () { Navigator.pop(ctx); _shareCardImage(vedic, refSign, l, chart); }),
+          ListTile(
+            leading: Icon(Icons.picture_as_pdf_outlined, color: acc),
+            title: Text(_t({AppLang.en: 'Full report (PDF)', AppLang.ur: 'مکمل رپورٹ (PDF)', AppLang.hi: 'पूरी रिपोर्ट (PDF)', AppLang.ar: 'التقرير الكامل (PDF)'}),
+              style: const TextStyle(color: kOn, fontWeight: FontWeight.w700)),
+            subtitle: Text(
+              vedic
+                ? _t({AppLang.en: 'Card + readings + all D-charts', AppLang.ur: 'کارڈ + ریڈنگ + تمام D-charts', AppLang.hi: 'कार्ड + रीडिंग + सभी D-charts', AppLang.ar: 'البطاقة + القراءات + كل المخططات'})
+                : _t({AppLang.en: 'Card + full reading', AppLang.ur: 'کارڈ + مکمل ریڈنگ', AppLang.hi: 'कार्ड + पूरी रीडिंग', AppLang.ar: 'البطاقة + القراءة الكاملة'}),
+              style: const TextStyle(color: kMuted, fontSize: 12)),
+            onTap: () { Navigator.pop(ctx); _shareFullPdf(vedic, refSign, l, chart); }),
+          const SizedBox(height: 12),
+        ])));
+  }
+
+  Future<void> _shareCardImage(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
+    final text = _shareCaption(vedic, refSign, l);
     showDialog<void>(context: context, barrierDismissible: false,
       builder: (_) => Center(child: CircularProgressIndicator(
         color: accentColor(vedic))));
     Uint8List? png;
-    try {
-      png = await _buildReportImage(vedic, refSign, l, chart);
-    } catch (_) {
-      png = null;
-    }
+    try { png = await _buildReportImage(vedic, refSign, l, chart); } catch (_) {}
     if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
-
     try {
       if (png != null) {
-        final f = File('${Directory.systemTemp.path}/farooq_report.png');
+        final f = File('${Directory.systemTemp.path}/farooq_card.png');
         await f.writeAsBytes(png);
         await Share.shareXFiles([XFile(f.path)], text: text);
         return;
       }
-      // Fallback: the sign artwork on its own.
       final resp = await http.get(Uri.parse(signBigArtUrl(refSign)))
         .timeout(const Duration(seconds: 20));
       if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
@@ -4230,8 +4454,179 @@ class _BirthChartTabState extends State<BirthChartTab> {
         await Share.shareXFiles([XFile(f.path)], text: text);
         return;
       }
-    } catch (_) {/* fall through to text-only */}
+    } catch (_) {/* fall through */}
     await openUrl('https://wa.me/?text=${Uri.encodeComponent(text)}');
+  }
+
+  Future<void> _shareFullPdf(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
+    final text = _shareCaption(vedic, refSign, l);
+    showDialog<void>(context: context, barrierDismissible: false,
+      builder: (_) => Center(child: Column(mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: accentColor(vedic)),
+          const SizedBox(height: 14),
+          Text(_t({AppLang.en: 'Building your report…', AppLang.ur: 'رپورٹ بن رہی ہے…', AppLang.hi: 'रिपोर्ट बन रही है…', AppLang.ar: 'يُجهّز تقريرك…'}),
+            style: const TextStyle(color: kOn, fontSize: 14)),
+        ])));
+    Uint8List? pdf;
+    try { pdf = await _buildFullReportPdf(vedic, refSign, l, chart); } catch (_) {}
+    if (mounted && Navigator.of(context).canPop()) Navigator.of(context).pop();
+    if (pdf != null) {
+      try {
+        final f = File('${Directory.systemTemp.path}/farooq_report.pdf');
+        await f.writeAsBytes(pdf);
+        await Share.shareXFiles([XFile(f.path)], text: text);
+        return;
+      } catch (_) {/* fall through */}
+    }
+    // Fallback: the card image.
+    await _shareCardImage(vedic, refSign, l, chart);
+  }
+
+  // Assemble the full multi-page PDF: card + reading (+ all D-charts, Vedic).
+  Future<Uint8List?> _buildFullReportPdf(bool vedic, int refSign, AppLang l,
+      LiveChart chart) async {
+    final acc = accentColor(vedic);
+    final im = await _fetchRptImgs(vedic, refSign);
+    final pages = <List<Object>>[];
+
+    final card = await _buildReportImage(vedic, refSign, l, chart);
+    if (card != null) pages.add([card, 1080.0, 1350.0]);
+
+    final rp = await _renderReportPage(
+      _readingEls(vedic, refSign, l, chart, im), acc);
+    if (rp != null) pages.add(rp);
+
+    if (vedic) {
+      for (final v in _vargas) {
+        final dp = await _renderReportPage(
+          _dChartEls(v, refSign, l, chart, im), acc);
+        if (dp != null) pages.add(dp);
+      }
+    }
+    if (pages.isEmpty) return null;
+
+    final doc = pw.Document();
+    for (final p in pages) {
+      final bytes = p[0] as Uint8List;
+      final pw2 = (p[1] as double), ph = (p[2] as double);
+      final mem = pw.MemoryImage(bytes);
+      doc.addPage(pw.Page(
+        pageFormat: PdfPageFormat(pw2, ph),
+        margin: pw.EdgeInsets.zero,
+        build: (_) => pw.Image(mem, fit: pw.BoxFit.fill)));
+    }
+    return doc.save();
+  }
+
+  // Reading page elements (title, intro, per-planet blocks).
+  List<_RE> _readingEls(bool vedic, int refSign, AppLang l, LiveChart chart,
+      _RptImgs im) {
+    final acc = accentColor(vedic);
+    final byK = {for (final b in chart.bodies) b.key: b};
+    String sn(int i) => signs[i].name[l] ?? signs[i].name[AppLang.en]!;
+    int house(int sign) => ((sign - refSign) % 12 + 12) % 12 + 1;
+    final sun = byK['Sun'], moon = byK['Moon'];
+    final els = <_RE>[
+      _reText(vedic ? _rTitleV[l]! : _rTitleW[l]!, 40, acc,
+        fw: FontWeight.w800, align: TextAlign.center, gap: 4),
+      _reText(_rSub[l]!, 22, kMuted, align: TextAlign.center, gap: 22),
+      _reText(_rIntro(l, sun == null ? '' : sn(sun.sign),
+        moon == null ? '' : sn(moon.sign)), 25, kOn, gap: 22),
+    ];
+    for (final k in _rGrahas) {
+      final b = byK[k];
+      if (b == null) continue;
+      final dig = _rDignity(k, b.sign);
+      final name = _rPlanetName[k]![l]!;
+      final parts = _rSentenceParts(l, name, _rGSig[k]![l]!,
+        sn(b.sign), _rTone[_rToneKey(dig)]![l]!);
+      els.add(_reIconRich(im.planets[k], [
+        TextSpan(text: name, style: TextStyle(color: kOn,
+          fontWeight: FontWeight.w800)),
+        TextSpan(text: '   ${_rHouseLabel(l, house(b.sign))} · ${_rHouse[house(b.sign) - 1][l]}',
+          style: const TextStyle(color: kMuted, fontWeight: FontWeight.w600)),
+      ], 25, gap: 4));
+      els.add(_reRich([
+        TextSpan(text: parts[0]),
+        TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
+          color: _rDigColor(dig), fontWeight: FontWeight.w700)),
+        TextSpan(text: parts[1]),
+      ], 24, gap: 20));
+    }
+    els.add(_reSpace(6));
+    els.add(_reText(_rDisc[l]!, 20, kMuted, gap: 0));
+    return els;
+  }
+
+  // One divisional-chart page: box + description + placements + summary.
+  List<_RE> _dChartEls(_Varga v, int refSign, AppLang l, LiveChart chart,
+      _RptImgs im) {
+    final acc = accentColor(true); // divisional charts are Vedic → purple
+    final byK = {for (final b in chart.bodies) b.key: b};
+    final ascV = _vargaSign(chart.asc, v.d);
+    // Build a synthetic varga chart for the box.
+    final vBodies = <LiveBody>[];
+    for (final k in _rGrahas) {
+      final b = byK[k];
+      if (b == null) continue;
+      final vs = _vargaSign(b.lon, v.d);
+      vBodies.add(LiveBody(k, vs * 30.0 + 15, b.retro, vs,
+        ((vs - ascV) % 12 + 12) % 12 + 1));
+    }
+    final vChart = LiveChart(ascV * 30.0 + 15, 0, ascV, vBodies);
+    String sn(int i) => signs[i].name[l] ?? signs[i].name[AppLang.en]!;
+    final theme = v.short[l]!;
+    final strong = <List<Object>>[], tender = <List<Object>>[];
+    for (final k in _rGrahas) {
+      final b = byK[k];
+      if (b == null) continue;
+      final sg = _vargaSign(b.lon, v.d);
+      final dig = _rDignity(k, sg);
+      if (dig == 'exalt' || dig == 'own') strong.add([k, sg, dig]);
+      else if (dig == 'debil') tender.add([k, sg, dig]);
+    }
+    final els = <_RE>[
+      _reText('D${v.d} · ${v.name}', 38, acc, fw: FontWeight.w800,
+        align: TextAlign.center, gap: 4),
+      _reText(v.short[l]!, 22, kMuted, align: TextAlign.center, gap: 18),
+      _reBox(vChart, ascV, im, 560, gap: 18),
+      _reText(_vuiShows[l]!.toUpperCase(), 18, kMuted, fw: FontWeight.w700, gap: 4),
+      _reText(v.sig[l]!, 24, kOn, gap: 18),
+      _reText(_vuiPlacements[l]!.toUpperCase(), 18, kMuted, fw: FontWeight.w700, gap: 6),
+    ];
+    for (final k in _rGrahas) {
+      final b = byK[k];
+      if (b == null) continue;
+      els.add(_reRow(im.planets[k], _rPlanetName[k]![l]!,
+        sn(_vargaSign(b.lon, v.d)), 24, kOn, kMuted, gap: 6));
+    }
+    els.add(_reSpace(8));
+    els.add(_reText(_vgHead[l]!, 22, acc, fw: FontWeight.w800, gap: 6));
+    if (strong.isEmpty && tender.isEmpty) {
+      els.add(_reText(_vgBalanced(l, theme), 23, kOn, gap: 8));
+    } else {
+      for (final e in [...strong, ...tender]) {
+        final k = e[0] as String, sg = e[1] as int, dig = e[2] as String;
+        final kind = (dig == 'exalt' || dig == 'own') ? 'strong' : 'tender';
+        final infl = _vgInfl[kind]![l]!.replaceAll('{t}', theme);
+        els.add(_reIconRich(im.planets[k], [
+          TextSpan(text: _rPlanetName[k]![l]!,
+            style: const TextStyle(fontWeight: FontWeight.w800)),
+          const TextSpan(text: ' — '),
+          TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
+            color: _rDigColor(dig), fontWeight: FontWeight.w700)),
+          TextSpan(text: ' (${sn(sg)}). $infl'),
+        ], 23, gap: 8));
+      }
+    }
+    final cat = strong.length > tender.length
+      ? 'good' : (tender.length > strong.length ? 'tender' : 'mixed');
+    els.add(_reText(_vgOverall[cat]![l]!.replaceAll('{t}', theme), 23, acc,
+      fw: FontWeight.w700, gap: 8));
+    els.add(_reText(_vuiNote[l]!.replaceAll('{d}', '${v.d}'), 19, kMuted, gap: 0));
+    return els;
   }
 
   // Draw the shareable report card on a canvas (matches the website _rcPaint).
