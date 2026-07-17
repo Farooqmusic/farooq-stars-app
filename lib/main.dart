@@ -1234,9 +1234,10 @@ class NatalChartView extends StatelessWidget {
   final int? houseRefSign; // House-1 sign for numbering (Sun/Moon/Asc); overrides selSign
   final String ascWord;  // "Ascendant" / "Lagna" label for the box pill
   final Color pillColor; // box ascendant-pill accent (gold for Live Sky)
+  final bool showDeg;    // show planet degrees (false for divisional charts)
   const NatalChartView({super.key, required this.chart, required this.vedic,
     this.boxMode = false, this.selSign, this.houseRefSign, this.ascWord = 'Asc',
-    this.pillColor = kGold});
+    this.pillColor = kGold, this.showDeg = true});
 
   Widget _planetChip(LiveBody b) {
     // Uniform planet size on the wheel (Sun a touch bigger). Retrograde planets
@@ -1323,7 +1324,7 @@ class NatalChartView extends StatelessWidget {
             width: 20, height: 20, fit: BoxFit.contain,
             errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20)),
         ])),
-      Text('${(b.lon % 30).floor()}°',
+      if (showDeg) Text('${(b.lon % 30).floor()}°',
         style: const TextStyle(color: kMuted, fontSize: 7.5,
           fontWeight: FontWeight.w700)),
     ]));
@@ -3500,6 +3501,273 @@ class _BirthReadingSectionState extends State<BirthReadingSection> {
 }
 
 // ===========================================================================
+// DIVISIONAL (VARGA) CHARTS — D1..D60, Vedic only. vargaSign() ported verbatim
+// from the website (Parashari rules), verified in Python. Each chart re-maps a
+// planet's sidereal longitude to its divisional sign.
+// ===========================================================================
+int _vmod12(int x) => ((x % 12) + 12) % 12;
+bool _vMov(int s) => s == 0 || s == 3 || s == 6 || s == 9;
+bool _vFix(int s) => s == 1 || s == 4 || s == 7 || s == 10;
+
+int _vargaSign(double lon, int d) {
+  final s = (lon / 30).floor() % 12;
+  final deg = ((lon % 30) + 30) % 30;
+  final part = (deg / (30 / d)).floor();
+  switch (d) {
+    case 1: return s;
+    case 2:
+      if (s % 2 == 0) return deg < 15 ? 4 : 3;
+      return deg < 15 ? 3 : 4;
+    case 3: return _vmod12(s + part * 4);
+    case 4: return _vmod12(s + part * 3);
+    case 7: return _vmod12((s % 2 == 0 ? s : _vmod12(s + 6)) + part);
+    case 9: return _vmod12((lon / (30 / 9)).floor());
+    case 10: return _vmod12((s % 2 == 0 ? s : _vmod12(s + 8)) + part);
+    case 12: return _vmod12(s + part);
+    case 16: return _vmod12((_vMov(s) ? 0 : (_vFix(s) ? 4 : 8)) + part);
+    case 20: return _vmod12((_vMov(s) ? 0 : (_vFix(s) ? 8 : 4)) + part);
+    case 24: return _vmod12((s % 2 == 0 ? 4 : 3) + part);
+    case 27: return _vmod12(const [0, 3, 6, 9][s % 4] + part);
+    case 30:
+      if (s % 2 == 0) {
+        if (deg < 5) return 0;
+        if (deg < 10) return 10;
+        if (deg < 18) return 8;
+        if (deg < 25) return 2;
+        return 6;
+      } else {
+        if (deg < 5) return 1;
+        if (deg < 12) return 5;
+        if (deg < 20) return 11;
+        if (deg < 25) return 9;
+        return 7;
+      }
+    case 40: return _vmod12((s % 2 == 0 ? 0 : 6) + part);
+    case 45: return _vmod12((_vMov(s) ? 0 : (_vFix(s) ? 4 : 8)) + part);
+    case 60: return _vmod12(s + (deg * 2).floor());
+    default: return s;
+  }
+}
+
+class _Varga {
+  final int d;
+  final String name;
+  final Map<AppLang, String> short;
+  final Map<AppLang, String> sig;
+  const _Varga(this.d, this.name, this.short, this.sig);
+}
+
+const List<_Varga> _vargas = [
+  _Varga(1, 'Rasi (Lagna)', {AppLang.en: 'Life', AppLang.ur: 'زندگی', AppLang.hi: 'जीवन', AppLang.ar: 'الحياة'}, {AppLang.en: 'The main birth chart — your overall life, body, health, personality and the broad shape of your destiny. Every other chart is read against this one.', AppLang.ur: 'بنیادی پیدائشی چارٹ — آپ کی مجموعی زندگی، جسم، صحت، شخصیت اور قسمت کا مجموعی خاکہ۔ باقی تمام چارٹ اِسی کے مقابل پڑھے جاتے ہیں۔', AppLang.hi: 'मुख्य जन्म चार्ट — आपका समग्र जीवन, शरीर, स्वास्थ्य, व्यक्तित्व और भाग्य की कुल रूपरेखा। बाकी सभी चार्ट इसी के सापेक्ष पढ़े जाते हैं।', AppLang.ar: 'المخطط الأساسي للميلاد — حياتك العامّة وجسدك وصحّتك وشخصيّتك وملامح مصيرك. وتُقرأ كلّ المخطّطات الأخرى في ضوئه.'}),
+  _Varga(2, 'Hora', {AppLang.en: 'Wealth', AppLang.ur: 'دولت', AppLang.hi: 'धन', AppLang.ar: 'الثروة'}, {AppLang.en: 'Wealth and money. The Hora chart examines your finances, earning capacity and material prosperity.', AppLang.ur: 'دولت اور مال۔ ہورا چارٹ آپ کی مالی حالت، کمائی کی صلاحیت اور خوشحالی کو دیکھتا ہے۔', AppLang.hi: 'धन और संपत्ति। होरा चार्ट आपकी आर्थिक स्थिति, कमाई की क्षमता और समृद्धि को देखता है।', AppLang.ar: 'الثروة والمال. يبحث مخطّط هورا في وضعك المالي وقدرتك على الكسب وازدهارك.'}),
+  _Varga(3, 'Drekkana', {AppLang.en: 'Siblings', AppLang.ur: 'بہن بھائی', AppLang.hi: 'भाई-बहन', AppLang.ar: 'الإخوة'}, {AppLang.en: 'Siblings, courage and initiative. It also reflects your drive, efforts and short journeys.', AppLang.ur: 'بہن بھائی، ہمت اور پہل۔ یہ آپ کے حوصلے، محنت اور چھوٹے سفر کو ظاہر کرتا ہے۔', AppLang.hi: 'भाई-बहन, साहस और पहल। यह आपके हौसले, परिश्रम और छोटी यात्राओं को दर्शाता है।', AppLang.ar: 'الإخوة والشجاعة والمبادرة. يعكس أيضًا دوافعك وجهودك وأسفارك القصيرة.'}),
+  _Varga(4, 'Chaturthamsha', {AppLang.en: 'Home', AppLang.ur: 'گھر', AppLang.hi: 'घर', AppLang.ar: 'المنزل'}, {AppLang.en: 'Home, property and fixed assets. It shows comforts, real estate, and your sense of inner security and fortune.', AppLang.ur: 'گھر، جائیداد اور مستقل اثاثے۔ یہ آرام، رئیل اسٹیٹ اور اندرونی تحفظ و قسمت دکھاتا ہے۔', AppLang.hi: 'घर, संपत्ति और स्थायी संपत्तियाँ। यह सुख, अचल संपत्ति और आंतरिक सुरक्षा व भाग्य दिखाता है।', AppLang.ar: 'المنزل والعقارات والأصول الثابتة. يُظهر الراحة والممتلكات وشعورك بالأمان الداخليّ والحظّ.'}),
+  _Varga(7, 'Saptamsha', {AppLang.en: 'Children', AppLang.ur: 'اولاد', AppLang.hi: 'संतान', AppLang.ar: 'الأبناء'}, {AppLang.en: 'Children and progeny. The Saptamsha reflects offspring, fertility and creative continuation.', AppLang.ur: 'اولاد اور تخلیق۔ سپتامشا اولاد، زرخیزی اور تخلیقی تسلسل کو ظاہر کرتا ہے۔', AppLang.hi: 'संतान और सृजन। सप्तांश संतान, प्रजनन और रचनात्मक निरंतरता को दर्शाता है।', AppLang.ar: 'الأبناء والذرّيّة. يعكس سابتامشا النسل والخصوبة والاستمرار الإبداعيّ.'}),
+  _Varga(9, 'Navamsha', {AppLang.en: 'Marriage', AppLang.ur: 'شادی', AppLang.hi: 'विवाह', AppLang.ar: 'الزواج'}, {AppLang.en: 'The most important chart after D1. It reveals marriage and the spouse, your deeper purpose, and the true inner strength of each planet. A planet strong in D1 but weak here loses much of its promise.', AppLang.ur: 'D1 کے بعد سب سے اہم چارٹ۔ یہ شادی اور جیون ساتھی، آپ کے گہرے مقصد، اور ہر سیارے کی اصل اندرونی طاقت دکھاتا ہے۔ جو سیارہ D1 میں مضبوط مگر یہاں کمزور ہو، اپنا وعدہ پورا نہیں کرتا۔', AppLang.hi: 'D1 के बाद सबसे महत्वपूर्ण चार्ट। यह विवाह और जीवनसाथी, आपके गहरे उद्देश्य, और हर ग्रह की वास्तविक आंतरिक शक्ति दिखाता है। जो ग्रह D1 में मज़बूत पर यहाँ कमज़ोर हो, अपना वादा पूरा नहीं करता।', AppLang.ar: 'أهمّ مخطّط بعد D1. يكشف الزواج والشريك، وهدفك الأعمق، والقوّة الداخليّة الحقيقيّة لكلّ كوكب. والكوكب القويّ في D1 لكنّه ضعيف هنا لا يفي بوعده.'}),
+  _Varga(10, 'Dashamsha', {AppLang.en: 'Career', AppLang.ur: 'کیریئر', AppLang.hi: 'करियर', AppLang.ar: 'المهنة'}, {AppLang.en: 'Career and public life. It shows your profession, status, achievements and reputation in the world.', AppLang.ur: 'کیریئر اور سماجی زندگی۔ یہ آپ کے پیشے، رتبے، کامیابیوں اور شہرت کو دکھاتا ہے۔', AppLang.hi: 'करियर और सार्वजनिक जीवन। यह आपके पेशे, पद, उपलब्धियों और प्रतिष्ठा को दिखाता है।', AppLang.ar: 'المهنة والحياة العامّة. يُظهر مهنتك ومكانتك وإنجازاتك وسمعتك في العالم.'}),
+  _Varga(12, 'Dwadashamsha', {AppLang.en: 'Parents', AppLang.ur: 'والدین', AppLang.hi: 'माता-पिता', AppLang.ar: 'الوالدان'}, {AppLang.en: 'Parents and ancestry. It reflects your mother and father, their wellbeing, and what you inherit from your lineage.', AppLang.ur: 'والدین اور نسب۔ یہ ماں باپ، اُن کی خیریت اور خاندانی ورثے کو ظاہر کرتا ہے۔', AppLang.hi: 'माता-पिता और वंश। यह माता-पिता, उनकी भलाई और पारिवारिक विरासत को दर्शाता है।', AppLang.ar: 'الوالدان والأصل. يعكس الأمّ والأب وعافيتهما وما تَرِثه من نسبك.'}),
+  _Varga(16, 'Shodashamsha', {AppLang.en: 'Comforts', AppLang.ur: 'آسائشیں', AppLang.hi: 'सुख', AppLang.ar: 'الرفاهية'}, {AppLang.en: 'Vehicles, comforts and luxuries. It indicates material happiness, conveyances and the ease (or unease) of everyday life.', AppLang.ur: 'سواریاں، آسائشیں اور آرام۔ یہ مادی خوشی، سواری اور روزمرہ زندگی کی آسانی (یا مشکل) بتاتا ہے۔', AppLang.hi: 'वाहन, सुख और विलासिता। यह भौतिक सुख, सवारी और दैनिक जीवन की सहजता (या असहजता) बताता है।', AppLang.ar: 'المركبات والرفاهية ووسائل الراحة. يدلّ على السعادة المادّيّة والمركبات ويسر الحياة اليوميّة أو عسرها.'}),
+  _Varga(20, 'Vimshamsha', {AppLang.en: 'Inner growth', AppLang.ur: 'باطنی نشوونما', AppLang.hi: 'आंतरिक विकास', AppLang.ar: 'النموّ الداخلي'}, {AppLang.en: 'Inner growth and the spiritual side of life. It reflects devotion, discipline of the mind, and progress along a personal or spiritual path.', AppLang.ur: 'باطنی نشوونما اور روحانی پہلو۔ یہ لگن، ذہنی نظم اور کسی ذاتی یا روحانی راہ پر پیش رفت کو ظاہر کرتا ہے۔', AppLang.hi: 'आंतरिक विकास और जीवन का आध्यात्मिक पक्ष। यह लगन, मन के अनुशासन और किसी व्यक्तिगत या आध्यात्मिक राह पर प्रगति को दर्शाता है।', AppLang.ar: 'النموّ الداخليّ والجانب الروحيّ من الحياة. يعكس الإخلاص وانضباط الذهن والتقدّم في مسارٍ شخصيٍّ أو روحيّ.'}),
+  _Varga(24, 'Chaturvimshamsha', {AppLang.en: 'Education', AppLang.ur: 'تعلیم', AppLang.hi: 'शिक्षा', AppLang.ar: 'التعليم'}, {AppLang.en: 'Education and learning. It shows academic success, knowledge, and skill in study.', AppLang.ur: 'تعلیم اور سیکھنا۔ یہ علمی کامیابی، علم اور پڑھائی میں مہارت دکھاتا ہے۔', AppLang.hi: 'शिक्षा और ज्ञान। यह शैक्षणिक सफलता, ज्ञान और अध्ययन में दक्षता दिखाता है।', AppLang.ar: 'التعليم والمعرفة. يُظهر النجاح الدراسيّ والعلم والمهارة في التحصيل.'}),
+  _Varga(27, 'Bhamsha', {AppLang.en: 'Strength', AppLang.ur: 'قوت', AppLang.hi: 'बल', AppLang.ar: 'القوّة'}, {AppLang.en: 'Strengths and weaknesses. It measures overall vitality, stamina and the underlying durability of body and mind.', AppLang.ur: 'قوت اور کمزوری۔ یہ مجموعی توانائی، قوتِ برداشت اور جسم و ذہن کی بنیادی مضبوطی ناپتا ہے۔', AppLang.hi: 'बल और दुर्बलता। यह समग्र ऊर्जा, सहनशक्ति और शरीर व मन की मूल मज़बूती मापता है।', AppLang.ar: 'القوّة والضعف. يقيس الحيويّة العامّة والقدرة على التحمّل ومتانة الجسد والعقل الأساسيّة.'}),
+  _Varga(30, 'Trimshamsha', {AppLang.en: 'Troubles', AppLang.ur: 'مشکلات', AppLang.hi: 'कष्ट', AppLang.ar: 'المصاعب'}, {AppLang.en: 'Troubles and vulnerabilities. It points to weaknesses, health risks and the difficulties one must guard against.', AppLang.ur: 'مشکلات اور کمزوریاں۔ یہ کمزور پہلوؤں، صحت کے خطرات اور اُن مشکلات کی نشاندہی کرتا ہے جن سے بچنا ہے۔', AppLang.hi: 'कष्ट और कमज़ोरियाँ। यह कमज़ोर पहलुओं, स्वास्थ्य जोखिमों और उन कठिनाइयों की ओर इशारा करता है जिनसे बचना है।', AppLang.ar: 'المصاعب ومواطن الضعف. يشير إلى نقاط الضعف والمخاطر الصحّيّة والصعوبات التي ينبغي الحذر منها.'}),
+  _Varga(40, 'Khavedamsha', {AppLang.en: 'Maternal', AppLang.ur: 'مادری', AppLang.hi: 'मातृ-पक्ष', AppLang.ar: 'من الأمّ'}, {AppLang.en: 'Maternal legacy. It reflects matrilineal influences and the auspicious or challenging effects passed down the mother’s line.', AppLang.ur: 'مادری ورثہ۔ یہ ماں کی طرف سے اثرات اور ننہیال سے ملنے والے اچھے یا مشکل اثرات دکھاتا ہے۔', AppLang.hi: 'मातृ-पक्ष की विरासत। यह माँ की ओर से प्रभाव और ननिहाल से मिलने वाले शुभ या कठिन प्रभाव दिखाता है।', AppLang.ar: 'إرث جهة الأمّ. يعكس تأثيرات الخطّ الأموميّ وما ينتقل منه من آثارٍ ميمونةٍ أو صعبة.'}),
+  _Varga(45, 'Akshavedamsha', {AppLang.en: 'Paternal', AppLang.ur: 'پدری', AppLang.hi: 'पितृ-पक्ष', AppLang.ar: 'من الأب'}, {AppLang.en: 'Paternal legacy and character. It reflects the father’s line, conduct, and one’s overall moral character.', AppLang.ur: 'پدری ورثہ اور کردار۔ یہ باپ کی طرف، چال چلن اور مجموعی اخلاقی کردار کو ظاہر کرتا ہے۔', AppLang.hi: 'पितृ-पक्ष और चरित्र। यह पिता की ओर, आचरण और समग्र नैतिक चरित्र को दर्शाता है।', AppLang.ar: 'إرث جهة الأب والأخلاق. يعكس خطّ الأب والسلوك والطابع الأخلاقيّ العامّ.'}),
+  _Varga(60, 'Shashtiamsha', {AppLang.en: 'Karma', AppLang.ur: 'کرم', AppLang.hi: 'कर्म', AppLang.ar: 'القدر'}, {AppLang.en: 'The most subtle chart — a fine summary of the whole life. In tradition it reflects deep-rooted tendencies and past-life karma, and needs a very precise birth time.', AppLang.ur: 'سب سے باریک چارٹ — پوری زندگی کا مہین خلاصہ۔ روایت میں یہ گہری فطری رجحانات اور پچھلے جنم کے کرموں کو ظاہر کرتا ہے، اور اِس کے لیے پیدائش کا وقت سیکنڈوں تک درست ہونا ضروری ہے۔', AppLang.hi: 'सबसे सूक्ष्म चार्ट — पूरे जीवन का महीन सारांश। परंपरा में यह गहरी प्रवृत्तियों और पूर्व-जन्म के कर्मों को दर्शाता है, और इसके लिए जन्म-समय सेकंड तक सही होना ज़रूरी है।', AppLang.ar: 'أدقّ المخطّطات — خلاصةٌ رقيقةٌ للحياة كلّها. وهو في التقليد يعكس النزعات العميقة وقَدَر الأعمال السابقة، ويتطلّب وقت ميلادٍ دقيقًا حتى الثواني.'}),
+];
+
+const Map<AppLang, String> _vgHead = {AppLang.en: 'What this means for you', AppLang.ur: 'آپ کے لیے اس کا مطلب', AppLang.hi: 'आपके लिए इसका अर्थ', AppLang.ar: 'ماذا يعني لك'};
+const Map<String, Map<AppLang, String>> _vgInfl = {
+  'strong': {AppLang.en: 'A strong, supportive influence on your {t}.', AppLang.ur: 'آپ کے {t} پر ایک مضبوط، سازگار اثر۔', AppLang.hi: 'आपके {t} पर एक मज़बूत, सहायक प्रभाव।', AppLang.ar: 'تأثيرٌ قويّ وداعمٌ على {t}.'},
+  'tender': {AppLang.en: 'A tender spot for your {t} — patience helps here.', AppLang.ur: 'آپ کے {t} کے لیے ایک نازک پہلو — یہاں صبر مددگار ہے۔', AppLang.hi: 'आपके {t} के लिए एक कोमल पक्ष — यहाँ धैर्य सहायक है।', AppLang.ar: 'موضعٌ رقيقٌ لـ{t} — يساعد الصبر هنا.'},
+};
+const Map<String, Map<AppLang, String>> _vgOverall = {
+  'good': {AppLang.en: 'Overall, your {t} chart looks supportive and promising.', AppLang.ur: 'مجموعی طور پر، آپ کا {t} چارٹ سازگار اور حوصلہ افزا لگتا ہے۔', AppLang.hi: 'कुल मिलाकर, आपका {t} चार्ट सहायक और आशाजनक दिखता है।', AppLang.ar: 'إجمالًا، يبدو مخطّط {t} لديك داعمًا وواعدًا.'},
+  'mixed': {AppLang.en: 'Overall, your {t} chart is mixed — strengths and lessons together.', AppLang.ur: 'مجموعی طور پر، آپ کا {t} چارٹ ملا جلا ہے — طاقتیں اور سبق ساتھ ساتھ۔', AppLang.hi: 'कुल मिलाकर, आपका {t} चार्ट मिश्रित है — शक्तियाँ और सबक साथ।', AppLang.ar: 'إجمالًا، مخطّط {t} لديك مختلط — قوّةٌ ودروسٌ معًا.'},
+  'tender': {AppLang.en: 'Overall, your {t} chart is tender — it rewards patience and care.', AppLang.ur: 'مجموعی طور پر، آپ کا {t} چارٹ نازک ہے — یہ صبر اور توجہ کا صلہ دیتا ہے۔', AppLang.hi: 'कुल मिलाकर, आपका {t} चार्ट कोमल है — यह धैर्य और देखभाल का प्रतिफल देता है।', AppLang.ar: 'إجمالًا، مخطّط {t} لديك رقيق — يكافئ الصبر والعناية.'},
+};
+String _vgBalanced(AppLang l, String t) {
+  switch (l) {
+    case AppLang.ur: return 'یہاں سیارے متوازن برجوں میں ہیں — ایک مستحکم، ہموار $t تصویر۔';
+    case AppLang.hi: return 'यहाँ ग्रह संतुलित राशियों में हैं — एक स्थिर, समतल $t तस्वीर।';
+    case AppLang.ar: return 'الكواكب هنا في أبراجٍ متوازنة — صورةٌ ثابتةٌ ومتّزنةٌ لـ$t.';
+    default: return 'The planets sit in balanced signs here — a steady, even picture for your $t.';
+  }
+}
+const Map<AppLang, String> _vuiTitle = {AppLang.en: 'Divisional Charts', AppLang.ur: 'تقسیمی چارٹس', AppLang.hi: 'विभाजन कुंडलियाँ', AppLang.ar: 'المخطّطات التقسيمية'};
+const Map<AppLang, String> _vuiSub = {AppLang.en: 'D1 – D60 · from your birth chart', AppLang.ur: 'D1 – D60 · آپ کے پیدائشی چارٹ سے', AppLang.hi: 'D1 – D60 · आपके जन्म चार्ट से', AppLang.ar: 'D1 – D60 · من مخطّط ميلادك'};
+const Map<AppLang, String> _vuiShows = {AppLang.en: 'What it shows', AppLang.ur: 'یہ کیا دکھاتا ہے', AppLang.hi: 'यह क्या दिखाता है', AppLang.ar: 'ماذا يُظهر'};
+const Map<AppLang, String> _vuiPlacements = {AppLang.en: 'Placements', AppLang.ur: 'مقامات', AppLang.hi: 'स्थितियाँ', AppLang.ar: 'المواضع'};
+const Map<AppLang, String> _vuiNote = {AppLang.en: 'Calculated by dividing each 30° sign into {d} equal parts (Parashari rules) from your Lahiri sidereal birth positions.', AppLang.ur: 'ہر ۳۰° برج کو {d} برابر حصوں میں تقسیم کر کے (پراشر اصول) آپ کی Lahiri sidereal پیدائشی پوزیشنز سے نکالا گیا۔', AppLang.hi: 'प्रत्येक 30° राशि को {d} बराबर भागों में बाँटकर (पराशर नियम) आपकी लाहिड़ी निरयन जन्म-स्थितियों से गणना की गई।', AppLang.ar: 'تُحسب بقسمة كلّ برجٍ (30°) إلى {d} أجزاءٍ متساوية (قواعد بَراشَرا) من مواقع ميلادك الفلكية (لاهيري).'};
+
+class DivisionalCharts extends StatefulWidget {
+  final LiveChart chart; // vedic (sidereal) chart
+  final AppLang l;
+  final Color accent;
+  const DivisionalCharts({super.key, required this.chart, required this.l,
+    required this.accent});
+  @override
+  State<DivisionalCharts> createState() => _DivisionalChartsState();
+}
+
+class _DivisionalChartsState extends State<DivisionalCharts> {
+  int _cur = 0;
+
+  LiveChart _vChart(int d) {
+    final ascV = _vargaSign(widget.chart.asc, d);
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
+    final bodies = <LiveBody>[];
+    for (final k in _rGrahas) {
+      final b = byKey[k];
+      if (b == null) continue;
+      final vs = _vargaSign(b.lon, d);
+      final house = ((vs - ascV) % 12 + 12) % 12 + 1;
+      bodies.add(LiveBody(k, vs * 30.0 + 15, b.retro, vs, house));
+    }
+    return LiveChart(ascV * 30.0 + 15, 0, ascV, bodies);
+  }
+
+  Widget _pImg(String key) => CachedNetworkImage(
+    imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[key]}',
+    width: 18, height: 18, fit: BoxFit.contain,
+    errorWidget: (_, __, ___) => const SizedBox(width: 18, height: 18));
+
+  List<Widget> _readingLines(_Varga v) {
+    final l = widget.l;
+    final theme = v.short[l]!;
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
+    final strong = <List<Object>>[], tender = <List<Object>>[];
+    for (final k in _rGrahas) {
+      final b = byKey[k];
+      if (b == null) continue;
+      final sg = _vargaSign(b.lon, v.d);
+      final dig = _rDignity(k, sg);
+      if (dig == 'exalt' || dig == 'own') {
+        strong.add([k, sg, dig]);
+      } else if (dig == 'debil') {
+        tender.add([k, sg, dig]);
+      }
+    }
+    final out = <Widget>[
+      Text(_vgHead[l]!, style: TextStyle(color: widget.accent, fontSize: 13.5,
+        fontWeight: FontWeight.w800, fontFamily: urduFont)),
+      const SizedBox(height: 6),
+    ];
+    if (strong.isEmpty && tender.isEmpty) {
+      out.add(Text(_vgBalanced(l, theme), style: const TextStyle(color: kOn,
+        fontSize: 13, height: 1.6)));
+    } else {
+      for (final e in [...strong, ...tender]) {
+        final k = e[0] as String, sg = e[1] as int, dig = e[2] as String;
+        final kind = (dig == 'exalt' || dig == 'own') ? 'strong' : 'tender';
+        final signName = signs[sg].name[l] ?? signs[sg].name[AppLang.en]!;
+        final infl = _vgInfl[kind]![l]!.replaceAll('{t}', theme);
+        out.add(Padding(padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            _pImg(k),
+            const SizedBox(width: 8),
+            Expanded(child: Text.rich(TextSpan(children: [
+              TextSpan(text: _rPlanetName[k]![l]!,
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+              const TextSpan(text: ' — '),
+              TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
+                color: _rDigColor(dig), fontWeight: FontWeight.w700)),
+              TextSpan(text: ' ($signName). $infl'),
+            ]), style: TextStyle(color: kOn, fontSize: 12.5, height: 1.55,
+              fontFamily: urduFont))),
+          ])));
+      }
+    }
+    final cat = strong.length > tender.length
+      ? 'good' : (tender.length > strong.length ? 'tender' : 'mixed');
+    out.add(const SizedBox(height: 8));
+    out.add(Text(_vgOverall[cat]![l]!.replaceAll('{t}', theme),
+      style: TextStyle(color: widget.accent, fontSize: 13,
+        fontWeight: FontWeight.w700, height: 1.55, fontFamily: urduFont)));
+    return out;
+  }
+
+  Widget _placeRow(String k) {
+    final l = widget.l;
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
+    final b = byKey[k];
+    if (b == null) return const SizedBox.shrink();
+    final vs = _vargaSign(b.lon, _vargas[_cur].d);
+    final signName = signs[vs].name[l] ?? signs[vs].name[AppLang.en]!;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(children: [
+        _pImg(k),
+        const SizedBox(width: 10),
+        Expanded(child: Text(_rPlanetName[k]![l]!,
+          style: const TextStyle(color: kOn, fontSize: 13,
+            fontWeight: FontWeight.w700, fontFamily: null))),
+        Text(signName, style: TextStyle(color: kMuted, fontSize: 13,
+          fontWeight: FontWeight.w600, fontFamily: urduFont)),
+      ]));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.l;
+    final v = _vargas[_cur];
+    final vChart = _vChart(v.d);
+    return card(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_vuiTitle[l]!, style: TextStyle(color: widget.accent, fontSize: 17,
+          fontWeight: FontWeight.w800, fontFamily: urduFont)),
+        const SizedBox(height: 2),
+        Text(_vuiSub[l]!, style: TextStyle(color: kMuted, fontSize: 12,
+          fontFamily: urduFont)),
+        const SizedBox(height: 12),
+        SingleChildScrollView(scrollDirection: Axis.horizontal,
+          child: Row(children: _vargas.asMap().entries.map((e) {
+            final i = e.key, vv = e.value;
+            final sel = i == _cur;
+            return Padding(padding: const EdgeInsetsDirectional.only(end: 8),
+              child: GestureDetector(onTap: () => setState(() => _cur = i),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(color: sel ? widget.accent : kCard,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: sel ? widget.accent : kBorder)),
+                  child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text('D${vv.d}', style: TextStyle(color: sel ? kBg : kOn,
+                      fontWeight: FontWeight.w800, fontSize: 13)),
+                    Text(vv.short[l]!, style: TextStyle(
+                      color: sel ? kBg : kMuted, fontSize: 9.5,
+                      fontWeight: FontWeight.w600, fontFamily: urduFont)),
+                  ]))));
+          }).toList())),
+        const SizedBox(height: 14),
+        NatalChartView(chart: vChart, vedic: true, boxMode: true,
+          houseRefSign: vChart.ascSign, ascWord: 'La', pillColor: widget.accent,
+          showDeg: false),
+        const SizedBox(height: 14),
+        Text('D${v.d} · ${v.name}', style: TextStyle(color: widget.accent,
+          fontSize: 15, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 8),
+        Text(_vuiShows[l]!.toUpperCase(), style: const TextStyle(color: kMuted,
+          fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        const SizedBox(height: 4),
+        Text(v.sig[l]!, style: const TextStyle(color: kOn, fontSize: 13,
+          height: 1.6)),
+        const SizedBox(height: 12),
+        Text(_vuiPlacements[l]!.toUpperCase(), style: const TextStyle(
+          color: kMuted, fontSize: 11, fontWeight: FontWeight.w700,
+          letterSpacing: 0.5)),
+        const SizedBox(height: 4),
+        ..._rGrahas.map(_placeRow),
+        const Divider(color: kBorder, height: 22),
+        ..._readingLines(v),
+        const SizedBox(height: 10),
+        Text(_vuiNote[l]!.replaceAll('{d}', '${v.d}'),
+          style: TextStyle(color: kMuted, fontSize: 11,
+            fontStyle: FontStyle.italic, fontFamily: urduFont)),
+      ]));
+  }
+}
+
+// ===========================================================================
 // BIRTH CHART tab — the user's own natal chart (Western + Vedic). Replaces the
 // old duplicate Zodiac grid. v1: one saved birth profile (date/time/place) →
 // box + round natal chart (via NatalChartView) + planet positions table with
@@ -4006,6 +4274,9 @@ class _BirthChartTabState extends State<BirthChartTab> {
         BirthReadingSection(chart: chart, vedic: vedic, l: l,
           accent: accentColor(vedic), houseRefSign: refSign,
           birthSig: '${_y}_${_mo}_${_d}_${_hh}_${_mi}_${_lat}_${_lon}_$refSign'),
+        // Divisional (varga) charts D1–D60 — Vedic only.
+        if (vedic) DivisionalCharts(chart: chart, l: l,
+          accent: accentColor(vedic)),
       ]);
   }
 
