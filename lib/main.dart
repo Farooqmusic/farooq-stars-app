@@ -3832,28 +3832,28 @@ class _BirthChartTabState extends State<BirthChartTab> {
   }
 
   // House-reference segmented control. Western: Sun / Asc. Vedic: Moon / Asc.
+  // Compact (sizes to content) so it fits on the same row as circle/box.
   Widget _refHalf(String key, String? icon, String label, String cur,
       Color acc, void Function(String) onSet) {
     final sel = cur == key;
-    return Expanded(child: GestureDetector(onTap: () => onSet(key),
+    return GestureDetector(onTap: () => onSet(key),
       child: AnimatedContainer(duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: sel ? acc : Colors.transparent,
           borderRadius: BorderRadius.circular(99)),
-        child: Row(mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min, children: [
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
             icon != null
               ? CachedNetworkImage(
                   imageUrl: '$kWebsite/app/planet-icons-v2/$icon',
                   width: 16, height: 16, fit: BoxFit.contain,
                   errorWidget: (_, __, ___) => const SizedBox(width: 16, height: 16))
               : Icon(Icons.arrow_upward, size: 15, color: sel ? kBg : acc),
-            const SizedBox(width: 6),
+            const SizedBox(width: 5),
             Text(label, style: TextStyle(color: sel ? kBg : kMuted,
               fontWeight: FontWeight.w700, fontSize: 12.5,
               fontFamily: urduFont)),
-          ]))));
+          ])));
   }
 
   Widget _refSeg(bool vedic, Color acc) {
@@ -3861,12 +3861,11 @@ class _BirthChartTabState extends State<BirthChartTab> {
     void onSet(String k) =>
       setState(() { if (vedic) { _refV = k; } else { _refW = k; } });
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 36),
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(color: kCard,
         borderRadius: BorderRadius.circular(99),
         border: Border.all(color: kBorder)),
-      child: Row(children: [
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
         _refHalf(vedic ? 'moon' : 'sun', vedic ? 'moon.png' : 'sun.png',
           vedic
             ? _t({AppLang.en: 'Moon', AppLang.ur: 'چاند', AppLang.hi: 'चंद्र', AppLang.ar: 'القمر'})
@@ -3876,6 +3875,50 @@ class _BirthChartTabState extends State<BirthChartTab> {
           _t({AppLang.en: 'Asc', AppLang.ur: 'طالع', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}),
           cur, acc, onSet),
       ]));
+  }
+
+  String _genderLabel(AppLang l) {
+    if (_gender == 'male') {
+      return _t({AppLang.en: 'Male', AppLang.ur: 'مرد', AppLang.hi: 'पुरुष', AppLang.ar: 'ذكر'});
+    }
+    if (_gender == 'female') {
+      return _t({AppLang.en: 'Female', AppLang.ur: 'عورت', AppLang.hi: 'महिला', AppLang.ar: 'أنثى'});
+    }
+    return '';
+  }
+
+  // Share the reference sign's artwork (Sun/Moon/Ascendant, whichever is on)
+  // to WhatsApp / any app, with a short caption. Same pattern as the daily
+  // share: fetch the art → temp file → share sheet, with a wa.me text fallback.
+  Future<void> _shareChart(bool vedic, int refSign, AppLang l) async {
+    final signName = signs[refSign].name[l] ?? signs[refSign].name[AppLang.en]!;
+    final refMode = vedic ? _refV : _refW;
+    final refLabel = refMode == 'asc'
+      ? (vedic
+          ? _t({AppLang.en: 'Lagna', AppLang.ur: 'لگنا', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'})
+          : _t({AppLang.en: 'Ascendant', AppLang.ur: 'طالع', AppLang.hi: 'लग्न', AppLang.ar: 'الطالع'}))
+      : (vedic ? _rPlanetName['Moon']![l]! : _rPlanetName['Sun']![l]!);
+    final sysName = vedic
+      ? _t({AppLang.en: 'Vedic Birth Chart', AppLang.ur: 'ویدک پیدائشی چارٹ', AppLang.hi: 'वैदिक जन्म कुंडली', AppLang.ar: 'خريطة الميلاد الفيدية'})
+      : _t({AppLang.en: 'Western Birth Chart', AppLang.ur: 'مغربی پیدائشی چارٹ', AppLang.hi: 'पश्चिमी जन्म कुंडली', AppLang.ar: 'خريطة الميلاد الغربية'});
+    final buf = StringBuffer()
+      ..writeln('✦ ${_name.isEmpty ? sysName : '$_name — $sysName'}')
+      ..writeln('$refLabel: $signName')
+      ..writeln(_birthLine())
+      ..writeln('')
+      ..writeln('📲 Farooq Stars: $kWebsite');
+    final text = buf.toString();
+    try {
+      final resp = await http.get(Uri.parse(signBigArtUrl(refSign)))
+        .timeout(const Duration(seconds: 20));
+      if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
+        final f = File('${Directory.systemTemp.path}/farooq_birth_$refSign.png');
+        await f.writeAsBytes(resp.bodyBytes);
+        await Share.shareXFiles([XFile(f.path)], text: text);
+        return;
+      }
+    } catch (_) {/* fall through to text-only */}
+    await openUrl('https://wa.me/?text=${Uri.encodeComponent(text)}');
   }
 
   Widget _chartView(bool vedic, AppLang l) {
@@ -3909,6 +3952,13 @@ class _BirthChartTabState extends State<BirthChartTab> {
                 style: TextStyle(color: accentColor(vedic), fontSize: 17,
                   fontWeight: FontWeight.w800, fontFamily: urduFont))),
               InkWell(
+                onTap: () => _shareChart(vedic, refSign, l),
+                borderRadius: BorderRadius.circular(20),
+                child: Padding(padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.ios_share,
+                    color: accentColor(vedic), size: 19))),
+              const SizedBox(width: 4),
+              InkWell(
                 onTap: () => setState(() => _editing = true),
                 borderRadius: BorderRadius.circular(20),
                 child: Padding(padding: const EdgeInsets.all(4),
@@ -3916,18 +3966,22 @@ class _BirthChartTabState extends State<BirthChartTab> {
                     color: accentColor(vedic), size: 18))),
             ]),
             const SizedBox(height: 4),
-            Text(_birthLine(),
+            Text(
+              _gender == null
+                ? _birthLine()
+                : '${_birthLine()}  ·  ${_genderLabel(l)}',
               style: const TextStyle(color: kMuted, fontSize: 13,
                 fontWeight: FontWeight.w600)),
           ])),
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          _viewToggle(false, Icons.circle_outlined),
-          const SizedBox(width: 14),
-          _viewToggle(true, Icons.crop_square),
-        ]),
-        const SizedBox(height: 10),
-        // Houses from Sun/Moon or Ascendant — rearranges everything below.
-        _refSeg(vedic, accentColor(vedic)),
+        // Circle/box + house-reference (Sun/Moon · Asc) all on one row.
+        FittedBox(fit: BoxFit.scaleDown, child: Row(
+          mainAxisSize: MainAxisSize.min, children: [
+            _viewToggle(false, Icons.circle_outlined),
+            const SizedBox(width: 8),
+            _viewToggle(true, Icons.crop_square),
+            const SizedBox(width: 14),
+            _refSeg(vedic, accentColor(vedic)),
+          ])),
         const SizedBox(height: 10),
         NatalChartView(chart: chart, vedic: vedic,
           boxMode: _boxMode, houseRefSign: refSign, ascWord: ascWord,
