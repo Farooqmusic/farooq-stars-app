@@ -3158,6 +3158,9 @@ List<String> _rSentenceParts(AppLang l, String name, String sig,
 // Live "Deeper AI reading" — Claude, via the same Cloudflare worker the
 // website uses. Posts the chart summary, shows the returned reading.
 const String kAiProxyUrl = 'https://farooq-stars-ai.babaqatar.workers.dev';
+// The worker only answers requests whose Origin is farooqstars.com. Browsers
+// block setting Origin, but a native app can send it, so the app is allowed.
+const String kSiteOrigin = 'https://www.farooqstars.com';
 const Map<AppLang, String> _aiBtn = {AppLang.en: 'Deeper AI reading', AppLang.ur: 'گہری AI ریڈنگ', AppLang.hi: 'गहरी AI रीडिंग', AppLang.ar: 'قراءة AI أعمق'};
 const Map<AppLang, String> _aiLoading = {AppLang.en: 'Reading your stars…', AppLang.ur: 'آپ کے ستارے پڑھے جا رہے ہیں…', AppLang.hi: 'आपके सितारे पढ़े जा रहे हैं…', AppLang.ar: 'تُقرأ نجومك…'};
 const Map<AppLang, String> _aiErr = {AppLang.en: 'Could not load the AI reading right now. Please try again later.', AppLang.ur: 'ابھی AI ریڈنگ نہیں مل سکی۔ بعد میں دوبارہ کوشش کریں۔', AppLang.hi: 'अभी AI रीडिंग नहीं मिल सकी। बाद में पुनः प्रयास करें।', AppLang.ar: 'تعذّر تحميل قراءة AI الآن. حاول لاحقًا.'};
@@ -3214,7 +3217,7 @@ class _AiReadingButtonState extends State<AiReadingButton> {
     setState(() { _loading = true; _error = false; });
     try {
       final r = await http.post(Uri.parse(kAiProxyUrl),
-        headers: const {'content-type': 'application/json'},
+        headers: const {'content-type': 'application/json', 'origin': kSiteOrigin},
         body: jsonEncode(_payload())).timeout(const Duration(seconds: 60));
       final d = jsonDecode(r.body);
       final reading = (d is Map && d['reading'] is String)
@@ -3278,8 +3281,18 @@ class _AiReadingButtonState extends State<AiReadingButton> {
   }
 }
 
-// The reading section widget — title, intro, one block per classical planet.
-class BirthReadingSection extends StatelessWidget {
+const Map<String, Map<AppLang, String>> _rTabLbl = {
+  'overall': {AppLang.en: 'Overall', AppLang.ur: 'مجموعی', AppLang.hi: 'समग्र', AppLang.ar: 'إجمالي'},
+  'today': {AppLang.en: 'Today', AppLang.ur: 'آج', AppLang.hi: 'आज', AppLang.ar: 'اليوم'},
+  'week': {AppLang.en: 'This Week', AppLang.ur: 'اس ہفتے', AppLang.hi: 'इस सप्ताह', AppLang.ar: 'هذا الأسبوع'},
+  'month': {AppLang.en: 'This Month', AppLang.ur: 'اس مہینے', AppLang.hi: 'इस महीने', AppLang.ar: 'هذا الشهر'},
+};
+const Map<AppLang, String> _rSource = {AppLang.en: 'Source: AstrologyAPI', AppLang.ur: 'ماخذ: AstrologyAPI', AppLang.hi: 'स्रोत: AstrologyAPI', AppLang.ar: 'المصدر: AstrologyAPI'};
+
+// The reading section — tabs: Overall (offline per-planet reading + live Claude
+// button) and Today / This Week / This Month (real forecast from AstrologyAPI
+// via the worker, with a "Source: AstrologyAPI" badge).
+class BirthReadingSection extends StatefulWidget {
   final LiveChart chart;
   final bool vedic;
   final AppLang l;
@@ -3289,73 +3302,196 @@ class BirthReadingSection extends StatelessWidget {
   const BirthReadingSection({super.key, required this.chart,
     required this.vedic, required this.l, required this.accent,
     required this.houseRefSign, required this.birthSig});
+  @override
+  State<BirthReadingSection> createState() => _BirthReadingSectionState();
+}
 
-  int _house(int sign) => ((sign - houseRefSign) % 12 + 12) % 12 + 1;
+class _BirthReadingSectionState extends State<BirthReadingSection> {
+  String _tab = 'overall';
+  static final Map<String, String> _fcache = {};
+  bool _fLoading = false;
+  bool _fError = false;
+  String? _fText;
+
+  int _house(int sign) => ((sign - widget.houseRefSign) % 12 + 12) % 12 + 1;
 
   Widget _pImg(String key) => CachedNetworkImage(
     imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[key]}',
     width: 20, height: 20, fit: BoxFit.contain,
     errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20));
 
-  @override
-  Widget build(BuildContext context) {
-    final byKey = {for (final b in chart.bodies) b.key: b};
+  // Forecast is by sign — Western uses the Sun sign, Vedic the Moon sign.
+  String _forecastSign() {
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
+    final b = widget.vedic ? byKey['Moon'] : byKey['Sun'];
+    final si = b?.sign ?? widget.chart.ascSign;
+    return signs[si].name[AppLang.en]!.toLowerCase();
+  }
+
+  String get _fkey =>
+    '${widget.vedic ? 'v' : 'w'}|$_tab|${widget.l.name}|${_forecastSign()}';
+
+  Future<void> _loadForecast() async {
+    final k = _fkey;
+    final cached = _fcache[k];
+    if (cached != null) {
+      setState(() { _fText = cached; _fLoading = false; _fError = false; });
+      return;
+    }
+    setState(() { _fLoading = true; _fError = false; _fText = null; });
+    try {
+      final r = await http.post(Uri.parse(kAiProxyUrl),
+        headers: const {'content-type': 'application/json', 'origin': kSiteOrigin},
+        body: jsonEncode({
+          'horoFeature': _tab, 'sign': _forecastSign(), 'lang': widget.l.name,
+        })).timeout(const Duration(seconds: 45));
+      final d = jsonDecode(r.body);
+      final txt = (d is Map && d['reading'] is String)
+        ? (d['reading'] as String).trim() : '';
+      if (!mounted) return;
+      if (txt.isNotEmpty) {
+        _fcache[k] = txt;
+        setState(() { _fText = txt; _fLoading = false; });
+      } else {
+        setState(() { _fError = true; _fLoading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _fError = true; _fLoading = false; });
+    }
+  }
+
+  void _setTab(String t) {
+    if (_tab == t) return;
+    setState(() { _tab = t; _fText = null; _fError = false; _fLoading = false; });
+    if (t != 'overall') _loadForecast();
+  }
+
+  Widget _tabBar() {
+    const order = ['overall', 'today', 'week', 'month'];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(children: order.map((t) {
+        final sel = _tab == t;
+        return Padding(padding: const EdgeInsetsDirectional.only(end: 8),
+          child: GestureDetector(onTap: () => _setTab(t),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: BoxDecoration(
+                color: sel ? widget.accent : kCard,
+                borderRadius: BorderRadius.circular(99),
+                border: Border.all(color: sel ? widget.accent : kBorder)),
+              child: Text(_rTabLbl[t]![widget.l]!,
+                style: TextStyle(color: sel ? kBg : kMuted,
+                  fontWeight: FontWeight.w700, fontSize: 12.5,
+                  fontFamily: urduFont)))));
+      }).toList()));
+  }
+
+  List<Widget> _overallBody() {
+    final l = widget.l;
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
     String signName(int i) => signs[i].name[l] ?? signs[i].name[AppLang.en]!;
     final sun = byKey['Sun'], moon = byKey['Moon'];
     final intro = _rIntro(l,
       sun == null ? '' : signName(sun.sign),
       moon == null ? '' : signName(moon.sign));
+    return [
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: kBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kBorder)),
+        child: Text(intro, style: TextStyle(color: kOn, fontSize: 13,
+          height: 1.6, fontFamily: urduFont))),
+      const SizedBox(height: 6),
+      ..._rGrahas.where(byKey.containsKey).map((k) {
+        final b = byKey[k]!;
+        final dig = _rDignity(k, b.sign);
+        final name = _rPlanetName[k]![l]!;
+        final parts = _rSentenceParts(l, name, _rGSig[k]![l]!,
+          signName(b.sign), _rTone[_rToneKey(dig)]![l]!);
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                _pImg(k),
+                const SizedBox(width: 8),
+                Text(name, style: TextStyle(color: kOn, fontSize: 14,
+                  fontWeight: FontWeight.w800, fontFamily: urduFont)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(
+                  '${_rHouseLabel(l, _house(b.sign))} · ${_rHouse[_house(b.sign) - 1][l]}',
+                  style: TextStyle(color: kMuted, fontSize: 11.5,
+                    fontWeight: FontWeight.w600, fontFamily: urduFont))),
+              ]),
+              const SizedBox(height: 4),
+              Text.rich(TextSpan(children: [
+                TextSpan(text: parts[0]),
+                TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
+                  color: _rDigColor(dig), fontWeight: FontWeight.w700)),
+                TextSpan(text: parts[1]),
+              ]), style: TextStyle(color: kOn, fontSize: 13, height: 1.6,
+                fontFamily: urduFont)),
+            ]));
+      }),
+      const SizedBox(height: 6),
+      AiReadingButton(chart: widget.chart, vedic: widget.vedic, l: l,
+        accent: widget.accent, houseRefSign: widget.houseRefSign,
+        birthSig: widget.birthSig),
+    ];
+  }
+
+  List<Widget> _forecastBody() {
+    final l = widget.l;
+    if (_fLoading) {
+      return [Padding(padding: const EdgeInsets.symmetric(vertical: 22),
+        child: Center(child: SizedBox(width: 20, height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2, color: widget.accent))))];
+    }
+    if (_fError) {
+      return [Padding(padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Text(_aiErr[l]!, style: TextStyle(color: kMuted, fontSize: 13,
+          fontFamily: urduFont)))];
+    }
+    if (_fText == null) return const [SizedBox.shrink()];
+    return [
+      Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: kBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: kBorder)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+          children: _fText!.split(RegExp(r'\n\n+')).map((p) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(p.trim(), style: TextStyle(color: kOn, fontSize: 13,
+              height: 1.6, fontFamily: urduFont)))).toList())),
+      const SizedBox(height: 8),
+      Row(children: [
+        Icon(Icons.verified_outlined, size: 14, color: widget.accent),
+        const SizedBox(width: 6),
+        Text(_rSource[l]!, style: const TextStyle(color: kMuted,
+          fontSize: 11.5, fontWeight: FontWeight.w600)),
+      ]),
+    ];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.l;
     return card(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(vedic ? _rTitleV[l]! : _rTitleW[l]!,
-          style: TextStyle(color: accent, fontSize: 17,
+        Text(widget.vedic ? _rTitleV[l]! : _rTitleW[l]!,
+          style: TextStyle(color: widget.accent, fontSize: 17,
             fontWeight: FontWeight.w800, fontFamily: urduFont)),
         const SizedBox(height: 2),
         Text(_rSub[l]!, style: TextStyle(color: kMuted, fontSize: 12,
           fontFamily: urduFont)),
         const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: kBg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: kBorder)),
-          child: Text(intro, style: TextStyle(color: kOn, fontSize: 13,
-            height: 1.6, fontFamily: urduFont))),
-        const SizedBox(height: 6),
-        ..._rGrahas.where(byKey.containsKey).map((k) {
-          final b = byKey[k]!;
-          final dig = _rDignity(k, b.sign);
-          final name = _rPlanetName[k]![l]!;
-          final parts = _rSentenceParts(l, name, _rGSig[k]![l]!,
-            signName(b.sign), _rTone[_rToneKey(dig)]![l]!);
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(children: [
-                  _pImg(k),
-                  const SizedBox(width: 8),
-                  Text(name, style: TextStyle(color: kOn, fontSize: 14,
-                    fontWeight: FontWeight.w800, fontFamily: urduFont)),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(
-                    '${_rHouseLabel(l, _house(b.sign))} · ${_rHouse[_house(b.sign) - 1][l]}',
-                    style: TextStyle(color: kMuted, fontSize: 11.5,
-                      fontWeight: FontWeight.w600, fontFamily: urduFont))),
-                ]),
-                const SizedBox(height: 4),
-                Text.rich(TextSpan(children: [
-                  TextSpan(text: parts[0]),
-                  TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
-                    color: _rDigColor(dig), fontWeight: FontWeight.w700)),
-                  TextSpan(text: parts[1]),
-                ]), style: TextStyle(color: kOn, fontSize: 13, height: 1.6,
-                  fontFamily: urduFont)),
-              ]));
-        }),
-        const SizedBox(height: 6),
-        AiReadingButton(chart: chart, vedic: vedic, l: l, accent: accent,
-          houseRefSign: houseRefSign, birthSig: birthSig),
+        _tabBar(),
+        const SizedBox(height: 12),
+        ...(_tab == 'overall' ? _overallBody() : _forecastBody()),
         const SizedBox(height: 10),
         Text(_rDisc[l]!, style: TextStyle(color: kMuted, fontSize: 11.5,
           fontStyle: FontStyle.italic, fontFamily: urduFont)),
@@ -3384,6 +3520,7 @@ class _BirthChartTabState extends State<BirthChartTab> {
   double _lat = 25.29, _lon = 51.53;
   String _tzName = 'Asia/Qatar', _cityName = 'Doha', _cc = 'QA';
   bool _datePicked = false, _timePicked = false, _placePicked = false;
+  String? _gender;         // 'male' | 'female' | null
   bool _boxMode = false;   // circle (false) / box (true)
   // House reference — Western: 'sun'|'asc' (default Sun, like the website);
   // Vedic: 'moon'|'asc' (default Ascendant/Lagna). Rearranges chart + table +
@@ -3410,6 +3547,8 @@ class _BirthChartTabState extends State<BirthChartTab> {
     _datePicked = _y > 0 && _mo > 0 && _d > 0;
     _timePicked = prefs.getBool('bTimeSet') ?? false;
     _placePicked = prefs.getString('bTz') != null;
+    final g = prefs.getString('bGender');
+    _gender = (g == null || g.isEmpty) ? null : g;
     _nameCtrl.text = _name;
     _editing = !_set;
   }
@@ -3503,10 +3642,31 @@ class _BirthChartTabState extends State<BirthChartTab> {
     prefs.setString('bTz', _tzName);
     prefs.setString('bCityName', _cityName);
     prefs.setString('bCC', _cc);
+    prefs.setString('bGender', _gender ?? '');
     setState(() { _set = true; _editing = false; });
   }
 
   // ---- form widgets ---------------------------------------------------------
+  Widget _genderPill(String key, IconData ic, String label) {
+    final sel = _gender == key;
+    final acc = accentColor(useVedic.value);
+    return Expanded(child: GestureDetector(
+      onTap: () => setState(() => _gender = sel ? null : key),
+      child: AnimatedContainer(duration: const Duration(milliseconds: 160),
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 11),
+        decoration: BoxDecoration(
+          color: sel ? acc : kBg,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: sel ? acc : kBorder)),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(ic, size: 16, color: sel ? kBg : kMuted),
+          const SizedBox(width: 6),
+          Text(label, style: TextStyle(color: sel ? kBg : kOn,
+            fontWeight: FontWeight.w700, fontSize: 13.5, fontFamily: urduFont)),
+        ]))));
+  }
+
   Widget _pickRow(String label, String value, IconData ic, VoidCallback tap) =>
     Padding(padding: const EdgeInsets.symmetric(vertical: 6),
       child: InkWell(onTap: tap, borderRadius: BorderRadius.circular(12),
@@ -3569,6 +3729,13 @@ class _BirthChartTabState extends State<BirthChartTab> {
                   borderSide: BorderSide(
                     color: accentColor(useVedic.value))))),
             const SizedBox(height: 10),
+            Row(children: [
+              _genderPill('male', Icons.male,
+                _t({AppLang.en: 'Male', AppLang.ur: 'مرد', AppLang.hi: 'पुरुष', AppLang.ar: 'ذكر'})),
+              _genderPill('female', Icons.female,
+                _t({AppLang.en: 'Female', AppLang.ur: 'عورت', AppLang.hi: 'महिला', AppLang.ar: 'أنثى'})),
+            ]),
+            const SizedBox(height: 6),
             _pickRow(_t({AppLang.en: 'Date', AppLang.ur: 'تاریخ',
               AppLang.hi: 'तिथि', AppLang.ar: 'التاريخ'}),
               _datePicked ? _dateStr() : _t({AppLang.en: 'Select',
