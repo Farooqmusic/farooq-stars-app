@@ -3037,11 +3037,327 @@ class _CitySearchSheetState extends State<CitySearchSheet> {
 }
 
 // ===========================================================================
+// PER-PLANET READING (Overall) — ported verbatim from the website reading
+// engine (VR_* tables). The same classical dignity table serves BOTH Western
+// and Vedic; only the planet's sign (tropical vs sidereal) and the title
+// differ. Covers the 9 classical grahas (no Uranus/Neptune/Pluto).
+// ===========================================================================
+// Exaltation sign index per planet; own signs (debilitation = exalt + 6).
+const Map<String, int> _rExalt = {
+  'Sun': 0, 'Moon': 1, 'Mars': 9, 'Mercury': 5, 'Jupiter': 3,
+  'Venus': 11, 'Saturn': 6, 'Rahu': 1, 'Ketu': 7,
+};
+const Map<String, List<int>> _rOwn = {
+  'Sun': [4], 'Moon': [3], 'Mars': [0, 7], 'Mercury': [2, 5],
+  'Jupiter': [8, 11], 'Venus': [1, 6], 'Saturn': [9, 10], 'Rahu': [], 'Ketu': [],
+};
+const List<String> _rGrahas = ['Sun', 'Moon', 'Mars', 'Mercury', 'Jupiter',
+  'Venus', 'Saturn', 'Rahu', 'Ketu'];
+
+String _rDignity(String k, int si) {
+  final ex = _rExalt[k]!;
+  if (si == ex) return 'exalt';
+  if ((ex + 6) % 12 == si) return 'debil';
+  if ((_rOwn[k] ?? const []).contains(si)) return 'own';
+  return 'neutral';
+}
+String _rToneKey(String d) =>
+  (d == 'exalt' || d == 'own') ? 'good' : (d == 'debil' ? 'tender' : 'mixed');
+Color _rDigColor(String d) => (d == 'exalt' || d == 'own')
+  ? const Color(0xFF57d39a)
+  : (d == 'debil' ? const Color(0xFFe6a6cc) : const Color(0xFFe3b23c));
+
+const Map<String, Map<AppLang, String>> _rPlanetName = {
+  'Sun': {AppLang.en: 'Sun', AppLang.ur: 'سورج', AppLang.hi: 'सूर्य', AppLang.ar: 'الشمس'},
+  'Moon': {AppLang.en: 'Moon', AppLang.ur: 'چاند', AppLang.hi: 'चंद्र', AppLang.ar: 'القمر'},
+  'Mercury': {AppLang.en: 'Mercury', AppLang.ur: 'عطارد', AppLang.hi: 'बुध', AppLang.ar: 'عطارد'},
+  'Venus': {AppLang.en: 'Venus', AppLang.ur: 'زہرہ', AppLang.hi: 'शुक्र', AppLang.ar: 'الزهرة'},
+  'Mars': {AppLang.en: 'Mars', AppLang.ur: 'مریخ', AppLang.hi: 'मंगल', AppLang.ar: 'المرّيخ'},
+  'Jupiter': {AppLang.en: 'Jupiter', AppLang.ur: 'مشتری', AppLang.hi: 'गुरु', AppLang.ar: 'المشتري'},
+  'Saturn': {AppLang.en: 'Saturn', AppLang.ur: 'زحل', AppLang.hi: 'शनि', AppLang.ar: 'زحل'},
+  'Rahu': {AppLang.en: 'Rahu', AppLang.ur: 'راہو', AppLang.hi: 'राहु', AppLang.ar: 'راهو'},
+  'Ketu': {AppLang.en: 'Ketu', AppLang.ur: 'کیتو', AppLang.hi: 'केतु', AppLang.ar: 'كيتو'},
+};
+const Map<String, Map<AppLang, String>> _rGSig = {
+  'Sun': {AppLang.en: "the soul, vitality, confidence and one's father", AppLang.ur: 'روح، توانائی، اعتماد اور والد', AppLang.hi: 'आत्मा, ऊर्जा, आत्मविश्वास और पिता', AppLang.ar: 'الروح والحيوية والثقة والأب'},
+  'Moon': {AppLang.en: "the mind, emotions, comfort and one's mother", AppLang.ur: 'ذہن، جذبات، سکون اور والدہ', AppLang.hi: 'मन, भावनाएँ, सुकून और माता', AppLang.ar: 'العقل والعواطف والراحة والأم'},
+  'Mars': {AppLang.en: 'energy, courage, drive and action', AppLang.ur: 'توانائی، ہمت، جوش اور عمل', AppLang.hi: 'ऊर्जा, साहस, जोश और कर्म', AppLang.ar: 'الطاقة والشجاعة والاندفاع والفعل'},
+  'Mercury': {AppLang.en: 'intellect, speech, learning and communication', AppLang.ur: 'عقل، گفتگو، سیکھنا اور رابطہ', AppLang.hi: 'बुद्धि, वाणी, सीखना और संवाद', AppLang.ar: 'الذكاء والكلام والتعلّم والتواصل'},
+  'Jupiter': {AppLang.en: 'wisdom, growth, fortune and guidance', AppLang.ur: 'حکمت، ترقی، خوش بختی اور رہنمائی', AppLang.hi: 'ज्ञान, विकास, भाग्य और मार्गदर्शन', AppLang.ar: 'الحكمة والنموّ والحظّ والإرشاد'},
+  'Venus': {AppLang.en: 'love, beauty, relationships and pleasures', AppLang.ur: 'محبت، حُسن، تعلقات اور لطافتیں', AppLang.hi: 'प्रेम, सौंदर्य, रिश्ते और सुख', AppLang.ar: 'الحبّ والجمال والعلاقات والمتع'},
+  'Saturn': {AppLang.en: "discipline, patience, duty and life's lessons", AppLang.ur: 'نظم، صبر، فرض اور زندگی کے اسباق', AppLang.hi: 'अनुशासन, धैर्य, कर्तव्य और जीवन के सबक', AppLang.ar: 'الانضباط والصبر والواجب ودروس الحياة'},
+  'Rahu': {AppLang.en: 'ambition, desire and the unconventional', AppLang.ur: 'حرص، خواہش اور غیر روایتی پن', AppLang.hi: 'महत्वाकांक्षा, इच्छा और अपरंपरागतता', AppLang.ar: 'الطموح والرغبة وغير المألوف'},
+  'Ketu': {AppLang.en: 'detachment, intuition and spirituality', AppLang.ur: 'بے نیازی، باطنی ادراک اور روحانیت', AppLang.hi: 'वैराग्य, अंतर्ज्ञान और आध्यात्म', AppLang.ar: 'الانفصال والحدس والروحانية'},
+};
+const List<Map<AppLang, String>> _rHouse = [
+  {AppLang.en: 'the self, body & personality', AppLang.ur: 'ذات، جسم اور شخصیت', AppLang.hi: 'स्वयं, शरीर और व्यक्तित्व', AppLang.ar: 'الذات والجسد والشخصية'},
+  {AppLang.en: 'wealth, family & speech', AppLang.ur: 'دولت، خاندان اور گفتار', AppLang.hi: 'धन, परिवार और वाणी', AppLang.ar: 'الثروة والعائلة والكلام'},
+  {AppLang.en: 'courage, siblings & effort', AppLang.ur: 'ہمت، بہن بھائی اور کوشش', AppLang.hi: 'साहस, भाई-बहन और प्रयास', AppLang.ar: 'الشجاعة والإخوة والجهد'},
+  {AppLang.en: 'home, mother & inner peace', AppLang.ur: 'گھر، والدہ اور باطنی سکون', AppLang.hi: 'घर, माता और भीतरी शांति', AppLang.ar: 'البيت والأم والسكينة'},
+  {AppLang.en: 'creativity, romance & children', AppLang.ur: 'تخلیق، رومانس اور اولاد', AppLang.hi: 'रचनात्मकता, प्रेम और संतान', AppLang.ar: 'الإبداع والرومانسية والأبناء'},
+  {AppLang.en: 'health, work & obstacles', AppLang.ur: 'صحت، کام اور رکاوٹیں', AppLang.hi: 'स्वास्थ्य, कार्य और बाधाएँ', AppLang.ar: 'الصحّة والعمل والعقبات'},
+  {AppLang.en: 'partnership & marriage', AppLang.ur: 'شراکت اور شادی', AppLang.hi: 'साझेदारी और विवाह', AppLang.ar: 'الشراكة والزواج'},
+  {AppLang.en: 'transformation & hidden things', AppLang.ur: 'تبدیلی اور پوشیدہ امور', AppLang.hi: 'रूपांतरण और गुप्त बातें', AppLang.ar: 'التحوّل والأمور الخفية'},
+  {AppLang.en: 'fortune, beliefs & dharma', AppLang.ur: 'قسمت، عقائد اور دھرم', AppLang.hi: 'भाग्य, आस्था और धर्म', AppLang.ar: 'الحظّ والمعتقدات والمبادئ'},
+  {AppLang.en: 'career, status & public life', AppLang.ur: 'کیریئر، مقام اور سماجی زندگی', AppLang.hi: 'करियर, प्रतिष्ठा और सार्वजनिक जीवन', AppLang.ar: 'المهنة والمكانة والحياة العامة'},
+  {AppLang.en: 'gains, friends & hopes', AppLang.ur: 'حاصلات، دوست اور امیدیں', AppLang.hi: 'लाभ, मित्र और आशाएँ', AppLang.ar: 'المكاسب والأصدقاء والآمال'},
+  {AppLang.en: 'rest, release & the inner world', AppLang.ur: 'آرام، رہائی اور باطنی دنیا', AppLang.hi: 'विश्राम, मुक्ति और भीतरी संसार', AppLang.ar: 'الراحة والتحرّر والعالم الداخلي'},
+];
+const Map<String, Map<AppLang, String>> _rDig = {
+  'exalt': {AppLang.en: 'exalted and very strong', AppLang.ur: 'اوچ یافتہ اور بہت مضبوط', AppLang.hi: 'उच्च का और बहुत प्रबल', AppLang.ar: 'في الشرف وقويّ جدًّا'},
+  'own': {AppLang.en: 'in its own sign — steady and at home', AppLang.ur: 'اپنی راشی میں — مستحکم اور پُرسکون', AppLang.hi: 'अपनी राशि में — स्थिर और सहज', AppLang.ar: 'في برجه — ثابت ومستقرّ'},
+  'debil': {AppLang.en: 'weakened, asking for patience', AppLang.ur: 'کمزور، صبر کا تقاضا کرتا', AppLang.hi: 'नीच का, धैर्य माँगता', AppLang.ar: 'ضعيف، يطلب الصبر'},
+  'neutral': {AppLang.en: 'fairly neutral and balanced', AppLang.ur: 'معتدل اور متوازن', AppLang.hi: 'तटस्थ और संतुलित', AppLang.ar: 'محايد ومتوازن'},
+};
+const Map<String, Map<AppLang, String>> _rTone = {
+  'good': {AppLang.en: 'A supportive placement — a natural strength to lean on.', AppLang.ur: 'ایک سازگار مقام — ایک قدرتی طاقت جس پر بھروسا کیا جا سکے۔', AppLang.hi: 'एक सहायक स्थिति — एक स्वाभाविक शक्ति जिस पर भरोसा करें।', AppLang.ar: 'موضع داعم — قوّة طبيعية يمكن الاتّكاء عليها.'},
+  'mixed': {AppLang.en: 'A balanced placement — its effects depend on the whole chart and your choices.', AppLang.ur: 'ایک متوازن مقام — اس کے اثرات پورے چارٹ اور آپ کے فیصلوں پر منحصر۔', AppLang.hi: 'एक संतुलित स्थिति — इसके प्रभाव पूरे चार्ट और आपके चुनावों पर निर्भर।', AppLang.ar: 'موضع متوازن — تعتمد آثاره على المخطّط كلّه واختياراتك.'},
+  'tender': {AppLang.en: 'A tender placement — growth here often comes through patience.', AppLang.ur: 'ایک نازک مقام — یہاں ترقی اکثر صبر سے آتی ہے۔', AppLang.hi: 'एक कोमल स्थिति — यहाँ विकास अक्सर धैर्य से आता है।', AppLang.ar: 'موضع رقيق — غالبًا ما يأتي النموّ هنا بالصبر.'},
+};
+const Map<AppLang, String> _rTitleW = {AppLang.en: 'Your Western Reading', AppLang.ur: 'آپ کی مغربی ریڈنگ', AppLang.hi: 'आपकी पश्चिमी रीडिंग', AppLang.ar: 'قراءتك الغربية'};
+const Map<AppLang, String> _rTitleV = {AppLang.en: 'Your Vedic Reading', AppLang.ur: 'آپ کی ویدک ریڈنگ', AppLang.hi: 'आपकी वैदिक रीडिंग', AppLang.ar: 'قراءتك الفيدية'};
+const Map<AppLang, String> _rSub = {AppLang.en: 'Each planet, by house · for curiosity & fun', AppLang.ur: 'ہر سیارہ، گھر کے لحاظ سے · تجسس و تفریح کے لیے', AppLang.hi: 'प्रत्येक ग्रह, घर अनुसार · जिज्ञासा व मनोरंजन हेतु', AppLang.ar: 'كلّ كوكب بحسب البيت · للفضول والمتعة'};
+const Map<AppLang, String> _rDisc = {AppLang.en: 'For curiosity and fun — a poetic reading, not a prediction.', AppLang.ur: 'محض تجسس و تفریح — ایک شاعرانہ تشریح، کوئی پیشین گوئی نہیں۔', AppLang.hi: 'केवल जिज्ञासा व मनोरंजन — एक काव्यात्मक पाठ, कोई भविष्यवाणी नहीं।', AppLang.ar: 'للفضول والمتعة — قراءة شاعرية لا تنبّؤ.'};
+
+String _rHouseLabel(AppLang l, int n) {
+  switch (l) {
+    case AppLang.hi: return '${n}वाँ घर';
+    case AppLang.ur: return 'گھر $n';
+    case AppLang.ar: return 'البيت $n';
+    default: return 'House $n';
+  }
+}
+String _rIntro(AppLang l, String a, String m) {
+  switch (l) {
+    case AppLang.ur: return 'آپ کے سورج کی راشی $a اور چاند کی راشی $m ہے — یہی آپ کے چارٹ کا مزاج طے کرتے ہیں۔ نیچے ہر سیارہ اپنے گھر کے مطابق آپ کی کہانی میں اپنا رنگ شامل کرتا ہے۔';
+    case AppLang.hi: return 'आपकी सूर्य राशि $a और चंद्र राशि $m है — ये मिलकर आपके चार्ट का मिज़ाज तय करते हैं। नीचे प्रत्येक ग्रह अपने घर के अनुसार आपकी कहानी में अपना रंग जोड़ता है।';
+    case AppLang.ar: return 'برج شمسك هو $a وبرج قمرك $m — معًا يحدّدان مزاج مخطّطك. في الأسفل، يضيف كلّ كوكب لونه إلى قصّتك بحسب البيت الذي يقع فيه.';
+    default: return 'Your Sun sign is $a and your Moon sign is $m — together they set the tone of your chart. Below, each planet adds its own colour to your story, according to the house it sits in.';
+  }
+}
+// The per-planet sentence split into (before, after) around the coloured
+// dignity phrase, so we can render the dignity word in its strength colour.
+List<String> _rSentenceParts(AppLang l, String name, String sig,
+    String sign, String tone) {
+  switch (l) {
+    case AppLang.ur:
+      return ['$name، $sig کی نمائندگی کرتا ہے۔ اِس گھر میں یہ کیفیت زندگی کے اِس پہلو کو رنگ دیتی ہے۔ یہ $sign میں ہے، جہاں یہ ', '۔ $tone'];
+    case AppLang.hi:
+      return ['$name, $sig का प्रतिनिधित्व करता है। इस घर में यह गुण जीवन के इस पहलू को रंग देता है। यह $sign में है, जहाँ यह ', '। $tone'];
+    case AppLang.ar:
+      return ['$name يمثّل $sig. في هذا البيت تُلوّن هذه الطاقة هذا الجانب من الحياة. وهو في $sign، حيث يكون ', '. $tone'];
+    default:
+      return ['$name represents $sig. In this house, that quality colours how this part of life unfolds. It sits in $sign, where it is ', '. $tone'];
+  }
+}
+
+// Live "Deeper AI reading" — Claude, via the same Cloudflare worker the
+// website uses. Posts the chart summary, shows the returned reading.
+const String kAiProxyUrl = 'https://farooq-stars-ai.babaqatar.workers.dev';
+const Map<AppLang, String> _aiBtn = {AppLang.en: 'Deeper AI reading', AppLang.ur: 'گہری AI ریڈنگ', AppLang.hi: 'गहरी AI रीडिंग', AppLang.ar: 'قراءة AI أعمق'};
+const Map<AppLang, String> _aiLoading = {AppLang.en: 'Reading your stars…', AppLang.ur: 'آپ کے ستارے پڑھے جا رہے ہیں…', AppLang.hi: 'आपके सितारे पढ़े जा रहे हैं…', AppLang.ar: 'تُقرأ نجومك…'};
+const Map<AppLang, String> _aiErr = {AppLang.en: 'Could not load the AI reading right now. Please try again later.', AppLang.ur: 'ابھی AI ریڈنگ نہیں مل سکی۔ بعد میں دوبارہ کوشش کریں۔', AppLang.hi: 'अभी AI रीडिंग नहीं मिल सकी। बाद में पुनः प्रयास करें।', AppLang.ar: 'تعذّر تحميل قراءة AI الآن. حاول لاحقًا.'};
+const Map<AppLang, String> _aiRefresh = {AppLang.en: 'Refresh AI', AppLang.ur: 'دوبارہ AI', AppLang.hi: 'फिर से AI', AppLang.ar: 'تحديث AI'};
+
+class AiReadingButton extends StatefulWidget {
+  final LiveChart chart;
+  final bool vedic;
+  final AppLang l;
+  final Color accent;
+  final String birthSig;
+  const AiReadingButton({super.key, required this.chart, required this.vedic,
+    required this.l, required this.accent, required this.birthSig});
+  @override
+  State<AiReadingButton> createState() => _AiReadingButtonState();
+}
+
+class _AiReadingButtonState extends State<AiReadingButton> {
+  static final Map<String, String> _cache = {};
+  bool _loading = false;
+  bool _error = false;
+  String? _text;
+
+  String get _key =>
+    '${widget.birthSig}|${widget.vedic ? 'vedic' : 'western'}|${widget.l.name}';
+
+  @override
+  void initState() { super.initState(); _text = _cache[_key]; }
+
+  Map<String, dynamic> _payload() {
+    final byKey = {for (final b in widget.chart.bodies) b.key: b};
+    String en(int i) => signs[i].name[AppLang.en]!;
+    final moon = byKey['Moon'];
+    return {
+      'lang': widget.l.name,
+      'system': widget.vedic ? 'vedic' : 'western',
+      'section': 'overall',
+      'ascendant': en(widget.chart.ascSign),
+      'moonSign': moon == null ? '' : en(moon.sign),
+      'planets': _rGrahas.where(byKey.containsKey).map((k) {
+        final b = byKey[k]!;
+        return {
+          'name': k, 'sign': en(b.sign), 'house': b.house,
+          'dignity': _rDignity(k, b.sign), 'retro': b.retro,
+        };
+      }).toList(),
+    };
+  }
+
+  Future<void> _fetch() async {
+    setState(() { _loading = true; _error = false; });
+    try {
+      final r = await http.post(Uri.parse(kAiProxyUrl),
+        headers: const {'content-type': 'application/json'},
+        body: jsonEncode(_payload())).timeout(const Duration(seconds: 60));
+      final d = jsonDecode(r.body);
+      final reading = (d is Map && d['reading'] is String)
+        ? (d['reading'] as String).trim() : '';
+      if (!mounted) return;
+      if (reading.isNotEmpty) {
+        _cache[_key] = reading;
+        setState(() { _text = reading; _loading = false; });
+      } else {
+        setState(() { _error = true; _loading = false; });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _error = true; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = widget.l;
+    if (_loading) {
+      return Padding(padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          SizedBox(width: 16, height: 16, child: CircularProgressIndicator(
+            strokeWidth: 2, color: widget.accent)),
+          const SizedBox(width: 10),
+          Text(_aiLoading[l]!, style: TextStyle(color: kMuted, fontSize: 13,
+            fontFamily: urduFont)),
+        ]));
+    }
+    final btn = Align(
+      alignment: Alignment.centerLeft,
+      child: OutlinedButton.icon(
+        onPressed: _fetch,
+        icon: Icon(Icons.auto_awesome, size: 18, color: widget.accent),
+        label: Text(_text == null ? _aiBtn[l]! : _aiRefresh[l]!,
+          style: TextStyle(color: widget.accent, fontSize: 13.5,
+            fontWeight: FontWeight.w800, fontFamily: urduFont)),
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: widget.accent.withOpacity(0.6)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(99)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10))));
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const SizedBox(height: 4),
+      btn,
+      if (_error) Padding(padding: const EdgeInsets.only(top: 8),
+        child: Text(_aiErr[l]!, style: TextStyle(color: kMuted, fontSize: 12.5,
+          fontFamily: urduFont))),
+      if (_text != null) Padding(padding: const EdgeInsets.only(top: 10),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: kBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: widget.accent.withOpacity(0.35))),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+            children: _text!.split(RegExp(r'\n\n+')).map((p) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(p.trim(), style: TextStyle(color: kOn, fontSize: 13,
+                height: 1.6, fontFamily: urduFont)))).toList()))),
+    ]);
+  }
+}
+
+// The reading section widget — title, intro, one block per classical planet.
+class BirthReadingSection extends StatelessWidget {
+  final LiveChart chart;
+  final bool vedic;
+  final AppLang l;
+  final Color accent;
+  final String birthSig;
+  const BirthReadingSection({super.key, required this.chart,
+    required this.vedic, required this.l, required this.accent,
+    required this.birthSig});
+
+  Widget _pImg(String key) => CachedNetworkImage(
+    imageUrl: '$kWebsite/app/planet-icons-v2/${_livePlanetIcon[key]}',
+    width: 20, height: 20, fit: BoxFit.contain,
+    errorWidget: (_, __, ___) => const SizedBox(width: 20, height: 20));
+
+  @override
+  Widget build(BuildContext context) {
+    final byKey = {for (final b in chart.bodies) b.key: b};
+    String signName(int i) => signs[i].name[l] ?? signs[i].name[AppLang.en]!;
+    final sun = byKey['Sun'], moon = byKey['Moon'];
+    final intro = _rIntro(l,
+      sun == null ? '' : signName(sun.sign),
+      moon == null ? '' : signName(moon.sign));
+    return card(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(vedic ? _rTitleV[l]! : _rTitleW[l]!,
+          style: TextStyle(color: accent, fontSize: 17,
+            fontWeight: FontWeight.w800, fontFamily: urduFont)),
+        const SizedBox(height: 2),
+        Text(_rSub[l]!, style: TextStyle(color: kMuted, fontSize: 12,
+          fontFamily: urduFont)),
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(color: kBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: kBorder)),
+          child: Text(intro, style: TextStyle(color: kOn, fontSize: 13,
+            height: 1.6, fontFamily: urduFont))),
+        const SizedBox(height: 6),
+        ..._rGrahas.where(byKey.containsKey).map((k) {
+          final b = byKey[k]!;
+          final dig = _rDignity(k, b.sign);
+          final name = _rPlanetName[k]![l]!;
+          final parts = _rSentenceParts(l, name, _rGSig[k]![l]!,
+            signName(b.sign), _rTone[_rToneKey(dig)]![l]!);
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  _pImg(k),
+                  const SizedBox(width: 8),
+                  Text(name, style: TextStyle(color: kOn, fontSize: 14,
+                    fontWeight: FontWeight.w800, fontFamily: urduFont)),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(
+                    '${_rHouseLabel(l, b.house)} · ${_rHouse[b.house - 1][l]}',
+                    style: TextStyle(color: kMuted, fontSize: 11.5,
+                      fontWeight: FontWeight.w600, fontFamily: urduFont))),
+                ]),
+                const SizedBox(height: 4),
+                Text.rich(TextSpan(children: [
+                  TextSpan(text: parts[0]),
+                  TextSpan(text: _rDig[dig]![l]!, style: TextStyle(
+                    color: _rDigColor(dig), fontWeight: FontWeight.w700)),
+                  TextSpan(text: parts[1]),
+                ]), style: TextStyle(color: kOn, fontSize: 13, height: 1.6,
+                  fontFamily: urduFont)),
+              ]));
+        }),
+        const SizedBox(height: 6),
+        AiReadingButton(chart: chart, vedic: vedic, l: l, accent: accent,
+          birthSig: birthSig),
+        const SizedBox(height: 10),
+        Text(_rDisc[l]!, style: TextStyle(color: kMuted, fontSize: 11.5,
+          fontStyle: FontStyle.italic, fontFamily: urduFont)),
+      ]));
+  }
+}
+
+// ===========================================================================
 // BIRTH CHART tab — the user's own natal chart (Western + Vedic). Replaces the
 // old duplicate Zodiac grid. v1: one saved birth profile (date/time/place) →
 // box + round natal chart (via NatalChartView) + planet positions table with
-// sign, nakshatra (Vedic), house and retrograde. Readings & divisional charts
-// (D1–D60) come in a later session.
+// sign, nakshatra (Vedic), house and retrograde. Plus the per-planet reading.
 // ===========================================================================
 class BirthChartTab extends StatefulWidget {
   const BirthChartTab({super.key});
@@ -3394,6 +3710,10 @@ class _BirthChartTabState extends State<BirthChartTab> {
             const Divider(color: kBorder, height: 20),
             ...chart.bodies.map((b) => _planetRow(b, vedic, l)),
           ])),
+        // Detailed per-planet reading (Overall) + live Claude AI reading.
+        BirthReadingSection(chart: chart, vedic: vedic, l: l,
+          accent: accentColor(vedic),
+          birthSig: '${_y}_${_mo}_${_d}_${_hh}_${_mi}_${_lat}_$_lon'),
       ]);
   }
 
