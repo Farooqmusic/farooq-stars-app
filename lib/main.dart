@@ -4980,7 +4980,159 @@ Widget _sheetRow(String label, String value) => Padding(
   ]));
 
 // ===========================================================================
-// MATCH tab — compatibility
+// WESTERN GENERAL compatibility (sign × sign) — ported from the website zodiac
+// page: six dimensions, aspect-based scores, verdict tier + summary, 4 langs.
+// ===========================================================================
+class _MCat {
+  final String k;
+  final String ic;
+  final Map<AppLang, String> lbl;
+  const _MCat(this.k, this.ic, this.lbl);
+}
+const List<_MCat> _mCats = [
+  _MCat('sex', '💞', {AppLang.en: 'Romance & Intimacy', AppLang.ur: 'رومان و قربت', AppLang.hi: 'रोमांस और नज़दीकी', AppLang.ar: 'الرومانسية والحميمية'}),
+  _MCat('trust', '🤝', {AppLang.en: 'Trust', AppLang.ur: 'اعتماد', AppLang.hi: 'भरोसा', AppLang.ar: 'الثقة'}),
+  _MCat('comm', '💬', {AppLang.en: 'Communication & Intellect', AppLang.ur: 'رابطہ و فہم', AppLang.hi: 'संवाद और बुद्धि', AppLang.ar: 'التواصل والفكر'}),
+  _MCat('emo', '🌊', {AppLang.en: 'Emotions', AppLang.ur: 'جذبات', AppLang.hi: 'भावनाएँ', AppLang.ar: 'المشاعر'}),
+  _MCat('val', '⚖️', {AppLang.en: 'Values', AppLang.ur: 'اقدار', AppLang.hi: 'मूल्य', AppLang.ar: 'القيم'}),
+  _MCat('act', '🎯', {AppLang.en: 'Shared Activities', AppLang.ur: 'مشترکہ مشاغل', AppLang.hi: 'साझा गतिविधियाँ', AppLang.ar: 'أنشطة مشتركة'}),
+];
+const Map<String, List<int>> _mScore = {
+  'sex': [80, 55, 72, 78, 85, 60, 90], 'trust': [86, 60, 80, 50, 90, 55, 66],
+  'comm': [82, 62, 88, 58, 84, 60, 73], 'emo': [84, 58, 76, 54, 88, 56, 70],
+  'val': [88, 56, 78, 52, 86, 54, 60], 'act': [80, 60, 86, 64, 82, 58, 69],
+};
+const Map<String, int> _mSeed = {
+  'sex': 3, 'trust': 5, 'comm': 7, 'emo': 11, 'val': 13, 'act': 17,
+};
+int _mAsp(int a, int b) => math.min((b - a + 12) % 12, (a - b + 12) % 12);
+int _mPct(String k, int a, int b, int asp) {
+  var v = _mScore[k]![asp] + (((a * b) + (a + b) + 1) * _mSeed[k]!) % 11 - 5;
+  if (v > 97) v = 97;
+  if (v < 33) v = 33;
+  return v;
+}
+class _MVerd {
+  final int min;
+  final String c;
+  final Map<AppLang, String> lbl;
+  const _MVerd(this.min, this.c, this.lbl);
+}
+const List<_MVerd> _mVerds = [
+  _MVerd(80, 'high', {AppLang.en: 'Excellent match', AppLang.ur: 'بہترین جوڑ', AppLang.hi: 'उत्तम मेल', AppLang.ar: 'توافق ممتاز'}),
+  _MVerd(64, 'high', {AppLang.en: 'Strong match', AppLang.ur: 'مضبوط جوڑ', AppLang.hi: 'मज़बूत मेल', AppLang.ar: 'توافق قوي'}),
+  _MVerd(50, 'mix', {AppLang.en: 'Fair match', AppLang.ur: 'مناسب جوڑ', AppLang.hi: 'ठीक-ठाक मेल', AppLang.ar: 'توافق معقول'}),
+  _MVerd(0, 'low', {AppLang.en: 'Takes effort', AppLang.ur: 'محنت طلب', AppLang.hi: 'मेहनत-तलब', AppLang.ar: 'يحتاج جهدًا'}),
+];
+_MVerd _mVerdOf(int p) {
+  for (final v in _mVerds) { if (p >= v.min) return v; }
+  return _mVerds.last;
+}
+const List<Map<AppLang, String>> _mSum = [
+  {AppLang.en: 'With so much in common, {A} and {B} understand each other almost instantly — a comfortable, strong bond, if they keep a little variety alive.', AppLang.ur: 'بے حد مماثلت کے باعث {A} اور {B} ایک دوسرے کو فوراً سمجھ لیں — آرام دہ، مضبوط رشتہ، بشرطیکہ تھوڑا تنوع رہے۔', AppLang.hi: 'बहुत कुछ समान होने से {A} और {B} एक-दूसरे को लगभग तुरंत समझ लें — आरामदेह, मज़बूत बंधन, बशर्ते थोड़ी विविधता रहे।', AppLang.ar: 'لتشابههما الكبير، يفهم {A} و{B} أحدهما الآخر فورًا — رابطةٌ مريحةٌ وقويّة، إن أبقيا بعض التنوّع.'},
+  {AppLang.en: '{A} and {B} are different yet neighbourly; with patience and give-and-take they grow into a warm, well-rounded pair.', AppLang.ur: '{A} اور {B} مختلف مگر پڑوسی جیسے؛ صبر اور لین دین سے ایک گرم، متوازن جوڑی بن جاتے ہیں۔', AppLang.hi: '{A} और {B} भिन्न पर पड़ोसी-से; धैर्य और लेन-देन से एक गर्म, संतुलित जोड़ी बनें।', AppLang.ar: '{A} و{B} مختلفان لكن متجاوران؛ بالصبر والأخذ والعطاء يصيران ثنائيًّا دافئًا متوازنًا.'},
+  {AppLang.en: '{A} and {B} blend easily — friendly, supportive and naturally in sync. One of the smoother, happier matches.', AppLang.ur: '{A} اور {B} آسانی سے گھل مل جائیں — دوستانہ، مددگار، قدرتی ہم آہنگی۔ خوشگوار جوڑوں میں سے ایک۔', AppLang.hi: '{A} और {B} सहजता से घुल-मिल जाएँ — मित्रवत, सहायक, स्वाभाविक तालमेल। सुखद जोड़ों में से एक।', AppLang.ar: 'يمتزج {A} و{B} بسهولة — ودودان وداعمان ومنسجمان طبيعيًّا. من أكثر التوافقات سلاسةً وسعادة.'},
+  {AppLang.en: '{A} and {B} feel a strong but challenging pull. Passion runs high, yet lasting peace needs compromise and cooling-off.', AppLang.ur: '{A} اور {B} میں مضبوط مگر مشکل کشش۔ جذبہ بلند، مگر دیرپا سکون کو سمجھوتہ اور ٹھنڈک چاہیے۔', AppLang.hi: '{A} और {B} में मज़बूत पर चुनौतीपूर्ण खिंचाव। जुनून ऊँचा, पर टिकाऊ शांति को समझौता और ठंडक चाहिए।', AppLang.ar: 'ينجذب {A} و{B} بقوّةٍ لكن بتحدٍّ. الشغف عالٍ، لكنّ السلام الدائم يحتاج تنازلًا وتهدئة.'},
+  {AppLang.en: '{A} and {B} share an effortless, harmonious flow. Trust and warmth come naturally — one of the most compatible pairs.', AppLang.ur: '{A} اور {B} میں بے ساختہ، ہم آہنگ بہاؤ۔ اعتماد و گرمجوشی فطری — سب سے ہم آہنگ جوڑوں میں۔', AppLang.hi: '{A} और {B} में सहज, सामंजस्यपूर्ण प्रवाह। भरोसा व गर्मजोशी स्वाभाविक — सबसे अनुकूल जोड़ों में।', AppLang.ar: 'يتشارك {A} و{B} انسيابًا عفويًّا ومنسجمًا. الثقة والدفء فطريّان — من أكثر الأزواج توافقًا.'},
+  {AppLang.en: '{A} and {B} are wired quite differently and must keep adjusting. With effort and humour, the contrast still works well.', AppLang.ur: '{A} اور {B} کافی مختلف، مسلسل موافقت درکار۔ محنت اور خوش مزاجی سے تضاد بھی خوب چل پڑتا ہے۔', AppLang.hi: '{A} और {B} काफ़ी भिन्न, निरंतर तालमेल चाहिए। मेहनत और हँसी-मज़ाक से विरोध भी चल पड़ता है।', AppLang.ar: '{A} و{B} مختلفان جدًّا ويحتاجان تكيّفًا مستمرًّا. بالجهد والمرح ينجح التباين أيضًا.'},
+  {AppLang.en: '{A} and {B} are opposites who magnetically complete each other. Balanced, it is powerful; unbalanced, it tips into tug-of-war.', AppLang.ur: '{A} اور {B} متضاد جو مقناطیسی طور پر ایک دوسرے کو مکمل کریں۔ توازن میں طاقتور؛ بے توازن ہو تو کھینچا تانی۔', AppLang.hi: '{A} और {B} विपरीत जो चुम्बकीय रूप से एक-दूसरे को पूर्ण करें। संतुलित हो तो शक्तिशाली; असंतुलित हो तो खींचतान।', AppLang.ar: '{A} و{B} ضدّان يكملان أحدهما الآخر مغناطيسيًّا. متوازنًا يكون قويًّا؛ ومختلًّا يتحوّل إلى شدٍّ وجذب.'},
+];
+Color _mBarCol(int p) => p >= 75
+  ? const Color(0xFF57D39A) : (p >= 55 ? const Color(0xFF9A6FE0) : const Color(0xFFE3B23C));
+Color _mTier(String c) => c == 'high'
+  ? const Color(0xFF57D39A) : (c == 'mix' ? const Color(0xFF9A6FE0) : const Color(0xFFE3B23C));
+
+class WesternGeneralCard extends StatelessWidget {
+  final int a, b;
+  final AppLang l;
+  const WesternGeneralCard({super.key, required this.a, required this.b,
+    required this.l});
+
+  Widget _thumb(int i) => ClipRRect(
+    borderRadius: BorderRadius.circular(10),
+    child: CachedNetworkImage(
+      imageUrl: '$kWebsite/Thumbnail_${signs[i].name[AppLang.en]!}.png',
+      width: 48, height: 48, fit: BoxFit.cover,
+      errorWidget: (_, __, ___) => SignIcon(i, size: 40)));
+
+  Widget _bar(String ic, String label, int p, {bool big = false}) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 7),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Row(children: [
+        Text(ic, style: const TextStyle(fontSize: 15)),
+        const SizedBox(width: 8),
+        Expanded(child: Text(label, style: TextStyle(color: kOn,
+          fontSize: big ? 14 : 13.5, fontWeight: FontWeight.w700,
+          fontFamily: urduFont))),
+        Text('$p%', style: TextStyle(color: _mBarCol(p),
+          fontSize: big ? 15 : 13.5, fontWeight: FontWeight.w800)),
+      ]),
+      const SizedBox(height: 5),
+      ClipRRect(borderRadius: BorderRadius.circular(99),
+        child: LinearProgressIndicator(value: p / 100, minHeight: 7,
+          backgroundColor: kBg,
+          valueColor: AlwaysStoppedAnimation(_mBarCol(p)))),
+    ]));
+
+  @override
+  Widget build(BuildContext context) {
+    final asp = _mAsp(a, b);
+    int sum = 0;
+    final rows = <Widget>[];
+    for (final cat in _mCats) {
+      final p = _mPct(cat.k, a, b, asp);
+      sum += p;
+      rows.add(_bar(cat.ic, cat.lbl[l] ?? cat.lbl[AppLang.en]!, p));
+    }
+    final tot = (sum / _mCats.length).round();
+    final v = _mVerdOf(tot);
+    final tier = _mTier(v.c);
+    final aName = signs[a].name[l] ?? signs[a].name[AppLang.en]!;
+    final bName = signs[b].name[l] ?? signs[b].name[AppLang.en]!;
+    final summary = (_mSum[asp][l] ?? _mSum[asp][AppLang.en]!)
+      .replaceAll('{A}', aName).replaceAll('{B}', bName);
+    return card(child: Column(children: [
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        _thumb(a),
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 12),
+          child: Text('❤', style: TextStyle(color: Color(0xFFff6b6b),
+            fontSize: 20))),
+        _thumb(b),
+      ]),
+      const SizedBox(height: 8),
+      Text('$aName  &  $bName', textAlign: TextAlign.center,
+        style: TextStyle(color: kOn, fontSize: 16, fontWeight: FontWeight.w800,
+          fontFamily: urduFont)),
+      const SizedBox(height: 10),
+      Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+          decoration: BoxDecoration(color: tier.withOpacity(0.15),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: tier.withOpacity(0.5))),
+          child: Text('$tot%', style: TextStyle(color: tier, fontSize: 18,
+            fontWeight: FontWeight.w900))),
+        const SizedBox(width: 10),
+        Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          decoration: BoxDecoration(color: tier.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(color: tier.withOpacity(0.4))),
+          child: Text(v.lbl[l] ?? v.lbl[AppLang.en]!,
+            style: TextStyle(color: tier, fontSize: 13,
+              fontWeight: FontWeight.w800, fontFamily: urduFont))),
+      ]),
+      const Divider(color: kBorder, height: 24),
+      ...rows,
+      const Divider(color: kBorder, height: 20),
+      _bar('🧮', {AppLang.en: 'Summary', AppLang.ur: 'خلاصہ', AppLang.hi: 'सारांश', AppLang.ar: 'الخلاصة'}[l]!, tot, big: true),
+      const SizedBox(height: 8),
+      Text(summary, style: TextStyle(color: kMuted, fontSize: 13, height: 1.55,
+        fontFamily: urduFont)),
+    ]));
+  }
+}
+
+// ===========================================================================
+// MATCH tab — compatibility (3 systems: Western General, Western, Vedic)
 // ===========================================================================
 class MatchTab extends StatefulWidget {
   const MatchTab({super.key});
@@ -4990,6 +5142,7 @@ class MatchTab extends StatefulWidget {
 
 class _MatchTabState extends State<MatchTab> {
   int? _a, _b;
+  String _mode = 'general'; // general · western · vedic
 
   Future<void> _pick(bool first) async {
     final picked = await showModalBottomSheet<int>(
@@ -5042,68 +5195,98 @@ class _MatchTabState extends State<MatchTab> {
       ]))));
 
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<bool>(
-    valueListenable: useVedic,
-    builder: (_, __, ___) {
-      final ready = _a != null && _b != null;
-      final score = ready ? matchScore(_a!, _b!) : 0;
-      return CenteredList(children: [
-        const SizedBox(height: 4),
-        Text(tr('pickTwo'), textAlign: TextAlign.center,
-          style: TextStyle(color: kMuted, fontSize: 14, height: 1.7,
-            fontFamily: urduFont)),
-        const SizedBox(height: 16),
-        Row(children: [
-          _slot(tr('firstSign'), _a, () => _pick(true)),
-          const Padding(padding: EdgeInsets.symmetric(horizontal: 12),
-            child: Text('♥', style: TextStyle(color: kPrimary, fontSize: 26))),
-          _slot(tr('secondSign'), _b, () => _pick(false)),
-        ]),
-        const SizedBox(height: 20),
-        if (ready) card(child: Column(children: [
-          SizedBox(width: 150, height: 150, child: Stack(
-            alignment: Alignment.center, children: [
-              SizedBox(width: 150, height: 150,
-                child: CircularProgressIndicator(
-                  value: score / 100, strokeWidth: 10,
-                  backgroundColor: kBg,
-                  valueColor: const AlwaysStoppedAnimation(kPrimary))),
-              Text('$score%', style: const TextStyle(color: kOn,
-                fontSize: 34, fontWeight: FontWeight.w900)),
-            ])),
-          const SizedBox(height: 14),
-          Text(tr(matchVerdictKey(score)), textAlign: TextAlign.center,
-            style: TextStyle(color: kGold, fontSize: 17,
-              fontWeight: FontWeight.w800, fontFamily: urduFont)),
-          const SizedBox(height: 6),
-          Text('${signName(signs[_a!])}  +  ${signName(signs[_b!])}',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: kMuted, fontSize: 13.5)),
-          const SizedBox(height: 16),
+  Widget _modePill(String key, String label) {
+    final sel = _mode == key;
+    return Expanded(child: GestureDetector(
+      onTap: () => setState(() => _mode = key),
+      child: AnimatedContainer(duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        decoration: BoxDecoration(color: sel ? kPrimary : kCard,
+          borderRadius: BorderRadius.circular(99),
+          border: Border.all(color: sel ? kPrimary : kBorder)),
+        child: Text(label, textAlign: TextAlign.center, maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: sel ? Colors.white : kMuted,
+            fontSize: 12.5, fontWeight: FontWeight.w700,
+            fontFamily: urduFont)))));
+  }
+
+  Widget _comingSoon(AppLang l, bool vedic) => card(child: Column(children: [
+    const SizedBox(height: 6),
+    Icon(vedic ? Icons.favorite : Icons.auto_graph, color: kLight, size: 40),
+    const SizedBox(height: 12),
+    Text(vedic
+      ? _t({AppLang.en: 'Vedic Match — Guna Milan', AppLang.ur: 'ویدک میچ — گُن ملاپ', AppLang.hi: 'वैदिक मैच — गुण मिलान', AppLang.ar: 'التوافق الفيدي — غونا ميلان'}, l)
+      : _t({AppLang.en: 'Western Match — Synastry', AppLang.ur: 'مغربی میچ — سناسٹری', AppLang.hi: 'पश्चिमी मैच — सिनैस्ट्री', AppLang.ar: 'التوافق الغربي'}, l),
+      textAlign: TextAlign.center, style: TextStyle(color: kGold, fontSize: 16,
+        fontWeight: FontWeight.w800, fontFamily: urduFont)),
+    const SizedBox(height: 8),
+    Text(_t({
+      AppLang.en: 'Full birth-chart matching (your saved birth + your partner\'s details) with the complete report, shareable card and PDF — arriving in the next update.',
+      AppLang.ur: 'مکمل پیدائشی چارٹ میچنگ (آپ کی محفوظ پیدائش + پارٹنر کی تفصیل) — اگلے اپڈیٹ میں مکمل رپورٹ، کارڈ اور PDF کے ساتھ۔',
+      AppLang.hi: 'पूर्ण जन्म-कुंडली मिलान (आपकी सहेजी जन्म + साथी की जानकारी) — पूरी रिपोर्ट, कार्ड और PDF के साथ अगले अपडेट में।',
+      AppLang.ar: 'مطابقة كاملة لمخطط الميلاد (ميلادك المحفوظ + تفاصيل الشريك) — بتقرير كامل وبطاقة وPDF في التحديث القادم.'}, l),
+      textAlign: TextAlign.center, style: const TextStyle(color: kMuted,
+        fontSize: 13, height: 1.6)),
+    const SizedBox(height: 6),
+  ]));
+
+  String _t(Map<AppLang, String> m, AppLang l) => m[l] ?? m[AppLang.en]!;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<AppLang>(
+    valueListenable: currentLang,
+    builder: (_, l, __) => ValueListenableBuilder<bool>(
+      valueListenable: useVedic,
+      builder: (_, __, ___) {
+        final ready = _a != null && _b != null;
+        return CenteredList(children: [
+          const SizedBox(height: 4),
+          // Three matching systems.
           Row(children: [
-            Expanded(child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: kLight,
-                side: const BorderSide(color: kBorder),
-                padding: const EdgeInsets.symmetric(vertical: 12)),
-              onPressed: () => Share.share(
-                '${signName(signs[_a!])} + ${signName(signs[_b!])} = $score% ✨ — Farooq Stars\n$kWebsite'),
-              icon: const Icon(Icons.share, size: 18),
-              label: Text(tr('share'),
-                style: TextStyle(fontFamily: urduFont)))),
-            const SizedBox(width: 10),
-            Expanded(child: FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: kPrimary,
-                padding: const EdgeInsets.symmetric(vertical: 12)),
-              onPressed: () => openUrl(kWebsite),
-              icon: const Icon(Icons.open_in_new, size: 18),
-              label: Text(tr('readOnWebsite'),
-                style: TextStyle(fontFamily: urduFont,
-                  fontWeight: FontWeight.w700)))),
+            _modePill('general', _t({AppLang.en: 'Western General', AppLang.ur: 'مغربی عمومی', AppLang.hi: 'पश्चिमी सामान्य', AppLang.ar: 'غربي عام'}, l)),
+            _modePill('western', _t({AppLang.en: 'Western', AppLang.ur: 'مغربی', AppLang.hi: 'पश्चिमी', AppLang.ar: 'غربي'}, l)),
+            _modePill('vedic', _t({AppLang.en: 'Vedic', AppLang.ur: 'ویدک', AppLang.hi: 'वैदिक', AppLang.ar: 'فيدي'}, l)),
           ]),
-        ])),
-      ]);
-    });
+          const SizedBox(height: 16),
+          if (_mode == 'general') ...[
+            Text(_t({
+              AppLang.en: 'Pick two signs — general Western compatibility, just for fun.',
+              AppLang.ur: 'دو سائن چنیں — عمومی مغربی مطابقت، محض دلچسپی کے لیے۔',
+              AppLang.hi: 'दो राशियाँ चुनें — सामान्य पश्चिमी अनुकूलता, बस मनोरंजन के लिए।',
+              AppLang.ar: 'اختر برجين — توافق غربي عام، للمتعة فقط.'}, l),
+              textAlign: TextAlign.center, style: TextStyle(color: kMuted,
+                fontSize: 13.5, height: 1.6, fontFamily: urduFont)),
+            const SizedBox(height: 14),
+            Row(children: [
+              _slot(tr('firstSign'), _a, () => _pick(true)),
+              const Padding(padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text('♥', style: TextStyle(color: kPrimary, fontSize: 26))),
+              _slot(tr('secondSign'), _b, () => _pick(false)),
+            ]),
+            const SizedBox(height: 18),
+            if (ready) WesternGeneralCard(a: _a!, b: _b!, l: l),
+            if (ready) Padding(padding: const EdgeInsets.only(top: 4),
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(foregroundColor: kLight,
+                  side: const BorderSide(color: kBorder),
+                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11)),
+                onPressed: () {
+                  final asp = _mAsp(_a!, _b!);
+                  int s = 0;
+                  for (final c in _mCats) s += _mPct(c.k, _a!, _b!, asp);
+                  final tot = (s / _mCats.length).round();
+                  final v = _mVerdOf(tot);
+                  Share.share('${signName(signs[_a!])} & ${signName(signs[_b!])} — '
+                    '$tot% ${v.lbl[l] ?? v.lbl[AppLang.en]!} ✨\nFarooq Stars · $kWebsite');
+                },
+                icon: const Icon(Icons.share, size: 18),
+                label: Text(tr('share'), style: TextStyle(fontFamily: urduFont)))),
+          ] else
+            _comingSoon(l, _mode == 'vedic'),
+        ]);
+      }));
 }
 
 // ===========================================================================
